@@ -5,17 +5,31 @@ import time
 
 # Creates a serial connection with the bmc, waits for it to initalize, writes the command, and prints the command line response
 
-ser = serial.Serial('/dev/ttyUSB0', 115200)
+def set_ip():
+    ser = serial.Serial('/dev/ttyUSB0', 115200)
+    user = "root\n"
+    passw = "0penBmc\n"
 
-try:
-    time.sleep(2)
-    command = "ifconfig eth0 up 10.1.2.20\n"
-    ser.write(command.encode('utf-8'))
-    response = ser.read_until(b'\n')
-    print("Response from BMC:", response.decode('utf-8'))
-    
-finally:
-    ser.close()
+    try:
+        time.sleep(2)
+        # login
+        ser.write(user.encode('utf-8'))
+        time.sleep(2)
+        ser.write(passw.encode('utf-8'))
+        time.sleep(5)
+        # Sending the command to set the IP
+        command = "ifconfig eth0 up 10.1.2.19\n"
+        ser.write(command.encode('utf-8'))
+
+        # Reading the prompt after login 
+        ser.read_until(b'$ ')
+
+        # Reading the response from the command
+        response = ser.read_until(b'\n')
+        print("Response from BMC:", response.decode('utf-8'))
+
+    finally:
+        ser.close()
 
 
 
@@ -46,10 +60,6 @@ def fw_update(fw_file, bmc_ip, token):
             return response.text
             
 
-# We want a function that will set the BMC IP through a serial connection as the BMC doesn't already have an IP
-# Example of setting BMC IP though command line: (anything * may change)
-# sudo screen /dev/ttyUSB0 115200
-# sudo ifconfig eno1* up 10.1.2.4*
 
 
      
