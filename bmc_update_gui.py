@@ -1,7 +1,7 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 import BMC_update_script as bmc
-
+import time
 
 
 def browse_file():
@@ -10,6 +10,11 @@ def browse_file():
         entry_file.config(state='normal')
         entry_file.delete(0, tk.END)
         entry_file.insert(0, filepath)
+
+def ip_button():
+    bmc.set_ip()
+    time.sleep(5)
+
 
 def fw_update():
     bmc_ip = entry_ip.get()
@@ -66,5 +71,9 @@ button_update.grid(row=4, columnspan=2, padx=5, pady=5)
 
 label_output = tk.Label(win, text="", wraplength=400, justify="left")
 label_output.grid(row=5, column=0, columnspan=3, padx=10, pady=10)
+
+set_ip_button = tk.Button(win, text="Set BMC IP", command=ip_button)
+set_ip_button.grid(row=4, columnspan=4, padx=5, pady=5)
+
 
 win.mainloop()
