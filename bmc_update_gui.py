@@ -67,13 +67,13 @@ button_browse = tk.Button(win, text="Browse", command=browse_file)
 button_browse.grid(row=3, column=2, padx=5, pady=5)
 
 button_update = tk.Button(win, text="Update Firmware", command=fw_update)
-button_update.grid(row=4, columnspan=2, padx=5, pady=5)
+button_update.grid(row=4, column=1, padx=5, pady=5)
 
 label_output = tk.Label(win, text="", wraplength=400, justify="left")
 label_output.grid(row=5, column=0, columnspan=3, padx=10, pady=10)
 
 set_ip_button = tk.Button(win, text="Set BMC IP", command=ip_button)
-set_ip_button.grid(row=4, columnspan=4, padx=5, pady=5)
+set_ip_button.grid(row=4, column=2, padx=20, pady=5)
 
 
 win.mainloop()
