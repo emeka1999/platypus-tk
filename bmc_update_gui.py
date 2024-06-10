@@ -3,7 +3,6 @@ from tkinter import filedialog
 import BMC_update_script as bmc
 import time
 
-
 def browse_file():
     filepath = filedialog.askopenfilename()
     if filepath:
@@ -12,7 +11,10 @@ def browse_file():
         entry_file.insert(0, filepath)
 
 def ip_button():
-    bmc.set_ip()
+    bmc_ip = entry_ip.get()
+    bmc_user = entry_user.get()
+    bmc_pass = entry_pass.get()
+    bmc.set_ip(bmc_ip, bmc_user, bmc_pass)
     time.sleep(5)
 
 
@@ -25,8 +27,6 @@ def fw_update():
     if not all([bmc_ip, bmc_pass, bmc_user, fw_file]):
         label_output.config(text="All fields are required.", fg="red")
         return
-    
-    
     
     token = bmc.get_token(bmc_ip, bmc_user, bmc_pass)
 

@@ -5,10 +5,10 @@ import time
 
 # Creates a serial connection with the bmc, waits for it to initalize, writes the command, and prints the command line response
 
-def set_ip():
+def set_ip(bmc_ip, bmc_user, bmc_pass):
     ser = serial.Serial('/dev/ttyUSB0', 115200)
-    user = "root\n"
-    passw = "0penBmc\n"
+    user = f"{bmc_user}\n"
+    passw = f"{bmc_pass}\n"
 
     try:
         time.sleep(2)
@@ -18,7 +18,7 @@ def set_ip():
         ser.write(passw.encode('utf-8'))
         time.sleep(5)
         # Sending the command to set the IP
-        command = "ifconfig eth0 up 10.1.2.19\n"
+        command = f"ifconfig eth0 up {bmc_ip}\n"
         ser.write(command.encode('utf-8'))
 
         # Reading the prompt after login 
@@ -30,7 +30,7 @@ def set_ip():
 
     finally:
         ser.close()
-
+    
 
 
 # Suppress the warning for unverified HTTPS requests
