@@ -1,6 +1,23 @@
 import requests
 import urllib3
-import paramiko
+import serial
+import time
+
+# Creates a serial connection with the bmc, waits for it to initalize, writes the command, and prints the command line response
+
+ser = serial.Serial('/dev/ttyUSB0', 115200)
+
+try:
+    time.sleep(2)
+    command = "ifconfig eth0 up 10.1.2.20\n"
+    ser.write(command.encode('utf-8'))
+    response = ser.read_until(b'\n')
+    print("Response from BMC:", response.decode('utf-8'))
+    
+finally:
+    ser.close()
+
+
 
 # Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -29,6 +46,10 @@ def fw_update(fw_file, bmc_ip, token):
             return response.text
             
 
+# We want a function that will set the BMC IP through a serial connection as the BMC doesn't already have an IP
+# Example of setting BMC IP though command line: (anything * may change)
+# sudo screen /dev/ttyUSB0 115200
+# sudo ifconfig eno1* up 10.1.2.4*
 
 
-
+     
