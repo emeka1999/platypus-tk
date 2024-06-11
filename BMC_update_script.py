@@ -25,12 +25,10 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
         ser.write(command.encode('utf-8'))
 
         # Reading the prompt after login 
-        ser.read_until(b'$ ')
+        ser.read_until(b'# ')
 
         # Reading the response from the command
         response = ser.read_until(b'\n')
-        print("Response from BMC:", response.decode('utf-8'))
-
     finally:
         ser.close()
 
@@ -56,14 +54,15 @@ def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_path):
 
         # Firmware update
         response = redfish_client.post(f"{update_service_url}/update", body=firmware_content, headers={"Content-Type": "application/octet-stream"})
-        if response.status == 200:
-            print("Firmware update initiated successfully.")
+        if response.status == (200 or 202):
+            print(response.text)
         else:
             print("Failed to initiate firmware update. Response code:", response.status)
     except Exception as e:
         print("Error occurred:", e)
     finally:
         redfish_client.logout()
+    
             
 
 
