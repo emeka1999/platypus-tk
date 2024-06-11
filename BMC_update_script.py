@@ -1,7 +1,10 @@
-import requests
 import urllib3
 import serial
 import time
+import redfish
+
+# Suppress the warning for unverified HTTPS requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Creates a serial connection with the bmc, waits for it to initalize, writes the command, and prints the command line response
 
@@ -30,34 +33,37 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
 
     finally:
         ser.close()
+
+
+# Updates the BMC using the redfish library
     
+def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_path):
+    redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
+    try:
+        redfish_client.login()
 
+        # Retrieve the Update Service
+        update_service = redfish_client.get("/redfish/v1/UpdateService")
+        if update_service.status != 200:
+            print("Failed to find the update service.")
+            exit()
 
-# Suppress the warning for unverified HTTPS requests
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        update_service_url = update_service.dict["@odata.id"]
 
-# Grabs the authentication token from Redfish API
-# A request is made to redfish and the response is then parsed for the token
+        # Read firmware file content
+        with open(fw_path, 'rb') as firmware_file:
+            firmware_content = firmware_file.read()
 
-def get_token(bmc_ip, bmc_user, bmc_pass):
-    response = requests.post(f"https://{bmc_ip}/redfish/v1/SessionService/Sessions",
-                             headers={"Content-Type": "application/json"},
-                             json={"UserName": bmc_user, "Password": bmc_pass},
-                             verify=False)  
-    response_headers = response.headers
-    token = response_headers.get('X-Auth-Token')
-    return token
-
-# Updates the BMC firmware
-# Reads the firmware file and 
-
-def fw_update(fw_file, bmc_ip, token):
-        with open(fw_file, 'rb') as firmware:
-            response = requests.post(f"https://{bmc_ip}/redfish/v1/UpdateService/update",
-                                     headers={"X-Auth-Token": token, "Content-Type": "application/octet-stream"},
-                                     data=firmware,
-                                     verify=False)  
-            return response.text
+        # Firmware update
+        response = redfish_client.post(f"{update_service_url}/update", body=firmware_content, headers={"Content-Type": "application/octet-stream"})
+        if response.status == 200:
+            print("Firmware update initiated successfully.")
+        else:
+            print("Failed to initiate firmware update. Response code:", response.status)
+    except Exception as e:
+        print("Error occurred:", e)
+    finally:
+        redfish_client.logout()
             
 
 

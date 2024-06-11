@@ -22,21 +22,13 @@ def fw_update():
     bmc_ip = entry_ip.get()
     bmc_user = entry_user.get()
     bmc_pass = entry_pass.get()
-    fw_file = entry_file.get()
+    fw_path = entry_file.get()
 
-    if not all([bmc_ip, bmc_pass, bmc_user, fw_file]):
+    if not all([bmc_user, bmc_pass, bmc_ip, fw_path]):
         label_output.config(text="All fields are required.", fg="red")
         return
     
-    token = bmc.get_token(bmc_ip, bmc_user, bmc_pass)
-
-    if not token:
-        label_output.config(text="Failed to obtain authentication token", fg="red")
-        return
-    
-    response_text = bmc.fw_update(fw_file, bmc_ip, token)
-
-    label_output.config(text=response_text, fg="green")
+    bmc.bmc_update(bmc_user, bmc_pass, bmc_ip, fw_path)
 
 
 
