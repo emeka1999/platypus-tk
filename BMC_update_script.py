@@ -29,6 +29,7 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
 
         # Reading the response from the command
         response = ser.read_until(b'\n')
+        print(response)
     finally:
         ser.close()
 
