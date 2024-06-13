@@ -30,6 +30,21 @@ def fw_update():
     
     bmc.bmc_update(bmc_user, bmc_pass, bmc_ip, fw_path)
 
+def reset_bmc_ip():
+    bmc_user = entry_user.get()
+    bmc_pass = entry_pass.get()
+    bmc_ip = entry_ip.get()
+
+    if not all([bmc_user, bmc_pass, bmc_ip]):
+        label_output.config(text = "All fields are required.", fg = "red")
+        return
+    bmc.reset_bmc(bmc_user, bmc_pass, bmc_ip)
+
+
+# def reset_bmc_sw():
+#     bmc.reset_sw()
+
+
 
 
 # GUI Setup
@@ -55,6 +70,7 @@ label_file = tk.Label(win, text="Firmware File:")
 label_file.grid(row=3, column=0, padx=5, pady=5)
 entry_file = tk.Entry(win, state="readonly")
 entry_file.grid(row=3, column=1, padx=5, pady=5)
+
 button_browse = tk.Button(win, text="Browse", command=browse_file)
 button_browse.grid(row=3, column=2, padx=5, pady=5)
 
@@ -67,5 +83,10 @@ label_output.grid(row=5, column=0, columnspan=3, padx=10, pady=10)
 set_ip_button = tk.Button(win, text="Set BMC IP", command=ip_button)
 set_ip_button.grid(row=4, column=2, padx=20, pady=5)
 
+button_reset_ip = tk.Button(win, text = "Reset BMC IP", command = reset_bmc_ip)
+button_reset_ip.grid(row = 2, column = 2, padx = 5, pady = 5)
+
+# button_reset_sw = tk.Button(win, text = "Reset Files", command = reset_bmc_sw)
+# button_reset_sw.grid(row = 1, column = 2, padx = 5, pady = 5)
 
 win.mainloop()

@@ -2,6 +2,9 @@ import urllib3
 import serial
 import time
 import redfish
+import requests
+import pydbus
+
 
 # Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -65,7 +68,29 @@ def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_path):
         redfish_client.logout()
     
             
+def reset_ip(bmc_user, bmc_pass, bmc_ip):
+    url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "ResetToDefaultsType": "ResetAll"
+    }
+    try:
+        response = requests.post(url, json=payload, headers=headers, auth=(bmc_user, bmc_pass), verify=False)
+        if response.status_code == 200:
+            print("BMC reset to factory defaults successfully.")
+        else:
+            print("Failed to reset BMC. Response code:", response.status_code)
+            print(response.json())
+    except Exception as e:
+        print("Error occurred:", e)
 
 
+# def reset_sw(bmc_user, bmc_pass, bmc_ip):
+#     bus = pydbus.SystemBus()
+#     bmc_object = bus.get('xyz.openbmc_project.Software.BMC.Updater', f'/xyz/openbmc_project/software/{bmc_ip}')
 
-     
+#     try:
+#         bmc_object.Reset("factory")
+#         print("Factory reset initiated successfully. The BMC will reset on the next reboot.")
+#     except Exception as e:
+#         print(f"Failed to initiate factory reset: {e}")
