@@ -83,14 +83,3 @@ def reset_ip(bmc_user, bmc_pass, bmc_ip):
             print(response.json())
     except Exception as e:
         print("Error occurred:", e)
-
-
-# def reset_sw(bmc_user, bmc_pass, bmc_ip):
-#     bus = pydbus.SystemBus()
-#     bmc_object = bus.get('xyz.openbmc_project.Software.BMC.Updater', f'/xyz/openbmc_project/software/{bmc_ip}')
-
-#     try:
-#         bmc_object.Reset("factory")
-#         print("Factory reset initiated successfully. The BMC will reset on the next reboot.")
-#     except Exception as e:
-#         print(f"Failed to initiate factory reset: {e}")

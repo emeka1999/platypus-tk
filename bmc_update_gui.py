@@ -40,13 +40,6 @@ def reset_bmc_ip():
         return
     bmc.reset_bmc(bmc_user, bmc_pass, bmc_ip)
 
-
-# def reset_bmc_sw():
-#     bmc.reset_sw()
-
-
-
-
 # GUI Setup
 win = tk.Tk()
 win.title("BMC Firmware Update")
@@ -85,8 +78,5 @@ set_ip_button.grid(row=4, column=2, padx=20, pady=5)
 
 button_reset_ip = tk.Button(win, text = "Reset BMC IP", command = reset_bmc_ip)
 button_reset_ip.grid(row = 2, column = 2, padx = 5, pady = 5)
-
-# button_reset_sw = tk.Button(win, text = "Reset Files", command = reset_bmc_sw)
-# button_reset_sw.grid(row = 1, column = 2, padx = 5, pady = 5)
 
 win.mainloop()
