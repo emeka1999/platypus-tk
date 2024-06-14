@@ -79,4 +79,8 @@ set_ip_button.grid(row=4, column=2, padx=20, pady=5)
 button_reset_ip = tk.Button(win, text = "Reset BMC IP", command = reset_bmc_ip)
 button_reset_ip.grid(row = 2, column = 2, padx = 5, pady = 5)
 
+branding_text = tk.Label(win, text="Rivan Adhikari - https://github.com/rivan2k", font=("Arial", 10), fg="grey")
+branding_text.place(relx=0.0, rely=1.0, anchor='sw', x=10, y=-10)
+
+
 win.mainloop()
