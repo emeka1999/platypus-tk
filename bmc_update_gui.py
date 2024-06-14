@@ -38,7 +38,7 @@ def reset_bmc_ip():
     if not all([bmc_user, bmc_pass, bmc_ip]):
         label_output.config(text = "All fields are required.", fg = "red")
         return
-    bmc.reset_bmc(bmc_user, bmc_pass, bmc_ip)
+    bmc.reset_ip(bmc_user, bmc_pass, bmc_ip)
 
 # GUI Setup
 win = tk.Tk()
