@@ -3,8 +3,6 @@ import serial
 import time
 import redfish
 import requests
-from nicegui import ui
-
 
 
 # Suppress the warning for unverified HTTPS requests
@@ -84,7 +82,3 @@ def reset_ip(bmc_user, bmc_pass, bmc_ip):
             print(response.json())
     except Exception as e:
         print("Error occurred:", e)
-
-
-ui.label('Hello NiceGUI!')
-ui.run()
