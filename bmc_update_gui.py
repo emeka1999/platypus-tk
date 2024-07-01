@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog
-import BMC_update_script as bmc
+import bmc as bmc
 import time
 
 def browse_file():
