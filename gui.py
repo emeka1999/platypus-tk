@@ -36,4 +36,4 @@ with ui.column().classes('absolute-top items-center mt-20'):
         ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg')
         ui.button('Reset BMC', on_click=reset_button).classes('w-48 h-10 rounded-lg')
 
-ui.run(native=True, dark=True, title='BMC App', window_size=(500, 700))
+ui.run(native=True, dark=True, title='BMC App', window_size=(500, 700), reload=False)
