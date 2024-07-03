@@ -8,27 +8,31 @@ import requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def set_ip(bmc_ip, bmc_user, bmc_pass):
-    ser = serial.Serial('/dev/ttyUSB0', 115200)
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
+    command = f"ifconfig eth0 up {bmc_ip}\n"
 
     try:
-        time.sleep(2)
-        # login
-        ser.write(user.encode('utf-8'))
-        time.sleep(2)
-        ser.write(passw.encode('utf-8'))
-        time.sleep(5)
-        # Sending the command to set the IP
-        command = f"ifconfig eth0 up {bmc_ip}\n"
-        ser.write(command.encode('utf-8'))
+        # Check if already logged in by looking for the command prompt
+        ser.write(b'\n')
+        time.sleep(1)
+        initial_prompt = ser.read_until(b'# ')
+        
+        if b'#' not in initial_prompt:
+            # Not logged in, proceed with login
+            ser.write(user.encode('utf-8'))
+            time.sleep(2)
+            ser.write(passw.encode('utf-8'))
+            time.sleep(5)
 
-        # Reading the prompt after login 
-        ser.read_until(b'# ')
+        # Send the command to set the IP
+        ser.write(command.encode('utf-8'))
 
         # Reading the response from the command
         response = ser.read_until(b'\n')
-        print(response)
+        print(response.decode('utf-8'))
     finally:
         ser.close()
 
