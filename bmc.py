@@ -4,11 +4,8 @@ import time
 import redfish
 import requests
 
-
 # Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# Creates a serial connection with the bmc, waits for it to initalize, writes the command, and prints the command line response
 
 def set_ip(bmc_ip, bmc_user, bmc_pass):
     ser = serial.Serial('/dev/ttyUSB0', 115200)
@@ -35,10 +32,7 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
     finally:
         ser.close()
 
-
-# Updates the BMC using the redfish library
-    
-def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_path):
+def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
     try:
         redfish_client.login()
@@ -47,26 +41,23 @@ def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_path):
         update_service = redfish_client.get("/redfish/v1/UpdateService")
         if update_service.status != 200:
             print("Failed to find the update service.")
-            exit()
+            return
 
         update_service_url = update_service.dict["@odata.id"]
 
-        # Read firmware file content
-        with open(fw_path, 'rb') as firmware_file:
-            firmware_content = firmware_file.read()
-
         # Firmware update
-        response = redfish_client.post(f"{update_service_url}/update", body=firmware_content, headers={"Content-Type": "application/octet-stream"})
-        if response.status == (200 or 202):
-            print(response.text)
+        headers = {"Content-Type": "application/octet-stream"}
+        response = redfish_client.post(f"{update_service_url}/update", body=fw_content, headers=headers)
+        if response.status in [200, 202]:
+            print("Update initiated successfully:", response.text)
+            task_url = response.dict.get('@odata.id')
         else:
             print("Failed to initiate firmware update. Response code:", response.status)
     except Exception as e:
         print("Error occurred:", e)
     finally:
         redfish_client.logout()
-    
-            
+
 def reset_ip(bmc_user, bmc_pass, bmc_ip):
     url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
     headers = {"Content-Type": "application/json"}
