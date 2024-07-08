@@ -60,12 +60,15 @@ def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
         redfish_client.logout()
 
 def reset_ip(bmc_user, bmc_pass, bmc_ip):
-    url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
-    headers = {"Content-Type": "application/json"}
-    payload = {"ResetToDefaultsType": "ResetAll"}
-    
-    try:
-        response = requests.post(url, json=payload, headers=headers, auth=(bmc_user, bmc_pass), verify=False)
+    redfish_client = redfish.redfish_client(base_url = f"https://{bmc_ip}", username = bmc_user, password = bmc_pass)
+    try: 
+        redfish_client.login()
+
+        url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
+        headers = {"Content-Type": "application/json"}
+        payload = {"ResetToDefaultsType": "ResetAll"}
+        
+        response = redfish_client.post(url, body=payload, headers=headers)
         if response.status_code == 200:
             print("BMC reset to factory defaults successfully.")
         else:
@@ -73,3 +76,5 @@ def reset_ip(bmc_user, bmc_pass, bmc_ip):
             print(response.json())
     except Exception as e:
         print("Error occurred:", e)
+    finally:
+        redfish_client.logout()
