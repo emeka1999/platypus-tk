@@ -1,8 +1,6 @@
 import urllib3
 import serial
 import time
-import redfish
-import requests
 
 # Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -37,6 +35,7 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
         ser.close()
 
 def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
+    import redfish
     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
     try:
         redfish_client.login()
@@ -54,7 +53,6 @@ def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
         response = redfish_client.post(f"{update_service_url}/update", body=fw_content, headers=headers)
         if response.status in [200, 202]:
             print("Update initiated successfully:", response.text)
-            task_url = response.dict.get('@odata.id')
         else:
             print("Failed to initiate firmware update. Response code:", response.status)
     except Exception as e:
@@ -63,6 +61,7 @@ def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
         redfish_client.logout()
 
 def reset_ip(bmc_user, bmc_pass, bmc_ip):
+    import requests
     url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
     headers = {"Content-Type": "application/json"}
     payload = {
