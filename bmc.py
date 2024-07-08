@@ -2,7 +2,7 @@ import urllib3
 import serial
 import time
 import redfish
-import requests
+
 
 # Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -67,7 +67,7 @@ def reset_ip(bmc_user, bmc_pass, bmc_ip):
         url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
         headers = {"Content-Type": "application/json"}
         payload = {"ResetToDefaultsType": "ResetAll"}
-        
+
         response = redfish_client.post(url, body=payload, headers=headers)
         if response.status_code == 200:
             print("BMC reset to factory defaults successfully.")
