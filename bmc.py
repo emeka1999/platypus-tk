@@ -8,32 +8,32 @@ import requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def set_ip(bmc_ip, bmc_user, bmc_pass):
-    with serial.Serial('/dev/ttyUSB0', 115200, timeout=1) as ser:
-        user = f"{bmc_user}\n"
-        passw = f"{bmc_pass}\n"
-        command = f"ifconfig eth0 up {bmc_ip}\n"
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    user = f"{bmc_user}\n"
+    passw = f"{bmc_pass}\n"
+    command = f"ifconfig eth0 up {bmc_ip}\n"
 
-        try:
-            # Check if already logged in by looking for the command prompt
-            ser.write(b'\n')
-            time.sleep(1)
-            initial_prompt = ser.read_until(b'# ')
+    try:
+        # Check if already logged in by looking for the command prompt
+        ser.write(b'\n')
+        time.sleep(1)
+        initial_prompt = ser.read_until(b'# ')
             
-            if b'#' not in initial_prompt:
-                # Not logged in, proceed with login
-                ser.write(user.encode('utf-8'))
-                time.sleep(2)
-                ser.write(passw.encode('utf-8'))
-                time.sleep(5)
+        if b'#' not in initial_prompt:
+            # Not logged in, proceed with login
+            ser.write(user.encode('utf-8'))
+            time.sleep(2)
+            ser.write(passw.encode('utf-8'))
+            time.sleep(5)
 
-            # Send the command to set the IP
-            ser.write(command.encode('utf-8'))
+        # Send the command to set the IP
+        ser.write(command.encode('utf-8'))
 
-            # Reading the response from the command
-            response = ser.read_until(b'\n')
-            print(response.decode('utf-8'))
-        except Exception as e:
-            print(f"Error: {e}")
+        # Reading the response from the command
+        response = ser.read_until(b'\n')
+        print(response.decode('utf-8'))
+    except Exception as e:
+        print(f"Error: {e}")
 
 def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
