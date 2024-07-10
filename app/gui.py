@@ -1,5 +1,5 @@
 from nicegui import ui
-import bmc as bmc
+import app.bmc as bmc
 
 
 fw_content = None

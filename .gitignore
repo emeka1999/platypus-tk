@@ -7,7 +7,9 @@ __pycache__/
 *.desktop
 /build/
 /dist/
+__init__.py
 host.py
+routes.py
 
 
 
