@@ -3,6 +3,7 @@ __pycache__/
 
 # PyInstaller
 *.spec
+*.sh
 /build/
 /dist/
 
