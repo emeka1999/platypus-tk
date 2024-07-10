@@ -6,6 +6,7 @@ __pycache__/
 *.sh
 /build/
 /dist/
+host.py
 
 
 bmc
