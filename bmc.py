@@ -2,7 +2,10 @@ import urllib3
 import serial
 import time
 import redfish
-
+import subprocess
+import os 
+import threading
+from http.server import SimpleHTTPRequestHandler, HTTPServer
 
 # Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -59,6 +62,7 @@ def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
     finally:
         redfish_client.logout()
 
+#FIX THIS
 def reset_ip(bmc_user, bmc_pass, bmc_ip):
     redfish_client = redfish.redfish_client(base_url = f"https://{bmc_ip}", username = bmc_user, password = bmc_pass)
     try: 
@@ -78,3 +82,37 @@ def reset_ip(bmc_user, bmc_pass, bmc_ip):
         print("Error occurred:", e)
     finally:
         redfish_client.logout()
+
+# NOT TESTED YET
+
+def flasher(bmc_ip, flash_file):
+    directory = '/home/intern/bmc_app/uploads'
+    port = 8001
+
+    os.chdir(directory)
+    handler = SimpleHTTPRequestHandler
+    httpd = HTTPServer(('0.0.0.0', port), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    print("Serving files from {directory} on port {port}")
+
+    url = f"http://{bmc_ip}/{flash_file}"
+    curl_command = f"curl -o {flash_file} {url}"
+
+    try:
+        subprocess.run(curl_command, shell=True, check=True)
+        print("Curl Complete")
+    except subprocess.CalledProcessError as e:
+        print(f"Error during curl: {e}")
+
+    try: 
+        subprocess.run('echo 0 > /sys/blocl/mmcblk0boot0/force_ro', shell=True, check=True)
+        print("MMC changed to RW successfully.")
+    except subprocess.CalledProcessError as e: 
+        print(f"Error changing MMC to RW: {e}")
+    
+    try: 
+        subprocess.run('dd if=fip.bin of=/dev/mmcblk0boot0 bs=512 seek=256', shell=True, check=True)
+        print("Flashed fip.bin successfully.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error flashing file: {e}")
+

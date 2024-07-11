@@ -3,12 +3,9 @@ __pycache__/
 
 # PyInstaller
 *.spec
-*.sh
-*.desktop
+*.bin
 /build/
 /dist/
-__init__.py
-host.py
-routes.py
+
 
 

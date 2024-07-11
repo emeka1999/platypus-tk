@@ -16,6 +16,9 @@ def ip_button():
 def reset_button():
     bmc.reset_ip(username.value, password.value, bmc_ip.value)
 
+def flash_button():
+    bmc.flasher(bmc_ip.value, flash_file.value)
+
 def on_upload(event):
     global fw_content
     fw_content = event.content.read()
@@ -27,11 +30,13 @@ with ui.column().classes('absolute-top items-center mt-20'):
             username = ui.input("Username: ").classes('w-72')
             password = ui.input('Password: ').classes('w-72').props('type=password')
             bmc_ip = ui.input("BMC IP: ").classes('w-72')
+            flash_file = ui.input("Test Flash Input: ").classes('w-72')
     with ui.row().classes('mt-6'):
         ui.upload(on_upload=on_upload, label='BMC Firmware Upload')
     with ui.row().classes('w-full justify-around mt-8'):
         ui.button('Update BMC', on_click=update_button).classes('w-48 h-10 rounded-lg')
         ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg')
         ui.button('Reset BMC', on_click=reset_button).classes('w-48 h-10 rounded-lg')
+        ui.button('Flash', on_click=flash_button).classes('w-48 h-10 rounded-lg')
 
-ui.run(native=True, dark=True, title='BMC App', window_size=(500, 700), reload=False)
+ui.run(native=True, dark=True, title='BMC App', window_size=(500, 700), reload=False, port=8000)
