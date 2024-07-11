@@ -3,9 +3,9 @@ import serial
 import time
 import redfish
 import subprocess
-import os 
-import threading
 import requests
+import threading
+import os
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 
 # Suppress the warning for unverified HTTPS requests
@@ -19,8 +19,6 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
 
     try:
         # Check if already logged in by looking for the command prompt
-        ser.write(b'\n')
-        time.sleep(1)
         initial_prompt = ser.read_until(b'# ')
             
         if b'#' not in initial_prompt:
@@ -38,6 +36,8 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
         print(response.decode('utf-8'))
     except Exception as e:
         print(f"Error: {e}")
+
+
 
 def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
@@ -63,6 +63,8 @@ def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
     finally:
         redfish_client.logout()
 
+
+
 def reset_ip(bmc_user, bmc_pass, bmc_ip):
     url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
     headers = {"Content-Type": "application/json"}
@@ -79,36 +81,40 @@ def reset_ip(bmc_user, bmc_pass, bmc_ip):
         print("Error occurred:", e)
            
 
-# NOT TESTED YET
+# NOT TESTED YET - doesnt work use serial
 
-def flasher(bmc_ip, flash_file):
+def flasher(bmc_user, bmc_pass, flash_file):
     directory = '/home/intern/bmc_app/uploads'
-    port = 8001
+    port = 5000
+    my_ip = '10.1.2.4'
+
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    user = f"{bmc_user}\n"
+    passw = f"{bmc_pass}\n"
 
     os.chdir(directory)
     handler = SimpleHTTPRequestHandler
     httpd = HTTPServer(('0.0.0.0', port), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    print("Serving files from {directory} on port {port}")
+    print(f"Serving files from {directory} on port {port}")
 
-    url = f"http://{bmc_ip}/{flash_file}"
+    url = f"http://{my_ip}:{port}/{flash_file}"
     curl_command = f"curl -o {flash_file} {url}"
 
-    try:
-        subprocess.run(curl_command, shell=True, check=True)
-        print("Curl Complete")
-    except subprocess.CalledProcessError as e:
-        print(f"Error during curl: {e}")
-
-    try: 
-        subprocess.run('echo 0 > /sys/blocl/mmcblk0boot0/force_ro', shell=True, check=True)
-        print("MMC changed to RW successfully.")
-    except subprocess.CalledProcessError as e: 
-        print(f"Error changing MMC to RW: {e}")
     
-    try: 
-        subprocess.run('dd if=fip.bin of=/dev/mmcblk0boot0 bs=512 seek=256', shell=True, check=True)
-        print("Flashed fip.bin successfully.")
-    except subprocess.CalledProcessError as e:
-        print(f"Error flashing file: {e}")
+    try:
+        # Check if already logged in by looking for the command prompt
+        initial_prompt = ser.read_until(b'# ')
+            
+        if b'#' not in initial_prompt:
+            # Not logged in, proceed with login
+            ser.write(user.encode('utf-8'))
+            time.sleep(2)
+            ser.write(passw.encode('utf-8'))
+            time.sleep(5)
 
+        # Write proper commands here
+        
+    except Exception as e:
+        print(f"Error: {e}")
+   
