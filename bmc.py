@@ -61,12 +61,19 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
     except Exception as e:
         print(f"Error: {e}")
 
+server_running = False
 
 def start_server(directory, port):
+    global server_running
+    if server_running:
+        print("Server is already running.")
+        return
+
     os.chdir(directory)
     handler = SimpleHTTPRequestHandler
     httpd = HTTPServer(('0.0.0.0', port), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    server_running = True
     print(f"Serving files from {directory} on port {port}")
 
 
