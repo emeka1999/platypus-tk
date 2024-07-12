@@ -7,8 +7,12 @@ import threading
 import os
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 
+
+
 # Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
 
 def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
@@ -34,6 +38,7 @@ def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
     finally:
         redfish_client.logout()
     
+
 
 def set_ip(bmc_ip, bmc_user, bmc_pass):
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
@@ -61,6 +66,8 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
     except Exception as e:
         print(f"Error: {e}")
 
+
+
 server_running = False
 
 def start_server(directory, port):
@@ -75,6 +82,7 @@ def start_server(directory, port):
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     server_running = True
     print(f"Serving files from {directory} on port {port}")
+
 
 
 def flasher(bmc_user, bmc_pass, flash_file, my_ip):
