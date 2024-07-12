@@ -49,6 +49,8 @@ def on_upload(event):
     global fw_content
     fw_content = event.content.read()
     ui.notify(f'Uploaded {event.name}')
+
+
                     
 with ui.column().classes('absolute-top items-center mt-20'):
     with ui.row():
@@ -65,11 +67,10 @@ with ui.column().classes('absolute-top items-center mt-20'):
         ui.button('Reset BMC', on_click=reset_button).classes('w-48 h-10 rounded-lg')
         ui.button('Flash U-Boot', on_click=flashub_button).classes('w-48 h-10 rounded-lg')
     with ui.row().classes('mt-6'):
-        ui.button('choose file', on_click=choose_file)
-    with ui.row().classes('mt-6'):
-        loading_bar = ui.linear_progress().classes('hidden w-full')
+        ui.linear_progress().classes('show w-full')
 
 
-ui.run(native=True, dark=True, title='BMC App', window_size=(500, 800), reload=False, port=8000)
+
+ui.run(native=True, dark=True, title='BMC App', window_size=(500, 900), reload=False, port=8000)
 
 
