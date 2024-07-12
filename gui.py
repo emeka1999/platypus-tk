@@ -17,7 +17,7 @@ def reset_button():
     bmc.reset_ip(username.value, password.value, bmc_ip.value)
 
 def flash_button():
-    bmc.flasher(flash_file.value)
+    bmc.flasher(username.value, password.value, flash_file.value)
 
 def on_upload(event):
     global fw_content

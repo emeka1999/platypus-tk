@@ -2,7 +2,6 @@ import urllib3
 import serial
 import time
 import redfish
-import subprocess
 import requests
 import threading
 import os
@@ -10,6 +9,31 @@ from http.server import SimpleHTTPRequestHandler, HTTPServer
 
 # Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
+    redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
+    try:
+        redfish_client.login()
+        update_service = redfish_client.get("/redfish/v1/UpdateService")
+        if update_service.status != 200:
+            print("Failed to find the update service.")
+            return
+
+        update_service_url = update_service.dict["@odata.id"]
+
+        # Firmware update
+        headers = {"Content-Type": "application/octet-stream"}
+        response = redfish_client.post(f"{update_service_url}/update", body=fw_content, headers=headers)
+
+        if response.status in [200, 202]:
+            print("Update initiated successfully:", response.text)
+        else:
+            print("Failed to initiate firmware update. Response code:", response.status)
+    except Exception as e:
+        print("Error occurred:", e)
+    finally:
+        redfish_client.logout()
+    
 
 def set_ip(bmc_ip, bmc_user, bmc_pass):
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
@@ -38,30 +62,56 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
         print(f"Error: {e}")
 
 
+def start_server(directory, port):
+    os.chdir(directory)
+    handler = SimpleHTTPRequestHandler
+    httpd = HTTPServer(('0.0.0.0', port), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    print(f"Serving files from {directory} on port {port}")
 
-def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
-    redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
+
+
+# NOT TESTED YET - doesnt work use serial
+
+def flasher(bmc_user, bmc_pass, flash_file):
+    directory = '/home/intern/bmc_app/uploads'
+    port = 5000
+    my_ip = '10.1.2.4'
+
+    start_server(directory, port)
+
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    user = f"{bmc_user}\n"
+    passw = f"{bmc_pass}\n"
+
     try:
-        redfish_client.login()
-        update_service = redfish_client.get("/redfish/v1/UpdateService")
-        if update_service.status != 200:
-            print("Failed to find the update service.")
-            return
+        initial_prompt = ser.read_until(b'# ')
+            
+        if b'#' not in initial_prompt:
+            ser.write(user.encode('utf-8'))
+            time.sleep(2)
+            ser.write(passw.encode('utf-8'))
+            time.sleep(5)
+        
+        url = f"http://{my_ip}:{port}/{flash_file}"
+        curl_command = f"curl -o {flash_file} {url}\n"
+        ser.write(curl_command.encode('utf-8'))
+        time.sleep(5)
+        print('Curl command sent.')
 
-        update_service_url = update_service.dict["@odata.id"]
+        command = "echo 0 > /sys/block/mmcblk0boot0/force_ro\n"
+        ser.write(command.encode('utf-8'))
+        time.sleep(4)
+        print('Changed MMC to RW')
 
-        # Firmware update
-        headers = {"Content-Type": "application/octet-stream"}
-        response = redfish_client.post(f"{update_service_url}/update", body=fw_content, headers=headers)
-
-        if response.status in [200, 202]:
-            print("Update initiated successfully:", response.text)
-        else:
-            print("Failed to initiate firmware update. Response code:", response.status)
-    except Exception as e:
-        print("Error occurred:", e)
+        command = f'dd if={flash_file} of=/dev/mmcblk0boot0 bs=512 seek=256\n'
+        ser.write(command.encode('utf-8'))
+        time.sleep(10)
+        print("Flashing complete")
+    except serial.SerialException as e:
+        print(f"Serial Error: {e}")
     finally:
-        redfish_client.logout()
+        ser.close()
 
 
 
@@ -81,40 +131,5 @@ def reset_ip(bmc_user, bmc_pass, bmc_ip):
         print("Error occurred:", e)
            
 
-# NOT TESTED YET - doesnt work use serial
 
-def flasher(bmc_user, bmc_pass, flash_file):
-    directory = '/home/intern/bmc_app/uploads'
-    port = 5000
-    my_ip = '10.1.2.4'
-
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    user = f"{bmc_user}\n"
-    passw = f"{bmc_pass}\n"
-
-    os.chdir(directory)
-    handler = SimpleHTTPRequestHandler
-    httpd = HTTPServer(('0.0.0.0', port), handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    print(f"Serving files from {directory} on port {port}")
-
-    url = f"http://{my_ip}:{port}/{flash_file}"
-    curl_command = f"curl -o {flash_file} {url}"
-
-    
-    try:
-        # Check if already logged in by looking for the command prompt
-        initial_prompt = ser.read_until(b'# ')
-            
-        if b'#' not in initial_prompt:
-            # Not logged in, proceed with login
-            ser.write(user.encode('utf-8'))
-            time.sleep(2)
-            ser.write(passw.encode('utf-8'))
-            time.sleep(5)
-
-        # Write proper commands here
-        
-    except Exception as e:
-        print(f"Error: {e}")
    
