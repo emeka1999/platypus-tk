@@ -70,13 +70,10 @@ def start_server(directory, port):
     print(f"Serving files from {directory} on port {port}")
 
 
-
-# NOT TESTED YET - doesnt work use serial
-
-def flasher(bmc_user, bmc_pass, flash_file):
-    directory = '/home/intern/bmc_app/uploads'
+def flasher(bmc_user, bmc_pass, flash_file, my_ip):
+    directory = os.path.dirname(flash_file)
+    file_name = os.path.basename(flash_file)
     port = 5000
-    my_ip = '10.1.2.4'
 
     start_server(directory, port)
 
@@ -93,8 +90,8 @@ def flasher(bmc_user, bmc_pass, flash_file):
             ser.write(passw.encode('utf-8'))
             time.sleep(5)
         
-        url = f"http://{my_ip}:{port}/{flash_file}"
-        curl_command = f"curl -o {flash_file} {url}\n"
+        url = f"http://{my_ip}:{port}/{file_name}"
+        curl_command = f"curl -o {file_name} {url}\n"
         ser.write(curl_command.encode('utf-8'))
         time.sleep(5)
         print('Curl command sent.')
@@ -104,7 +101,7 @@ def flasher(bmc_user, bmc_pass, flash_file):
         time.sleep(4)
         print('Changed MMC to RW')
 
-        command = f'dd if={flash_file} of=/dev/mmcblk0boot0 bs=512 seek=256\n'
+        command = f'dd if={file_name} of=/dev/mmcblk0boot0 bs=512 seek=256\n'
         ser.write(command.encode('utf-8'))
         time.sleep(10)
         print("Flashing complete")
