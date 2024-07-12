@@ -1,27 +1,13 @@
 from nicegui import app, ui
 import bmc as bmc
-from functools import wraps
 
 
 
 fw_content = None
 flash_file = None
 
-def with_loading_bar(func):
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        loading_bar.classes(remove='hidden')
-        loading_bar.set_value(0.5)  # Set loading to 50% initially, adjust as needed
-        try:
-            await func(*args, **kwargs)
-        finally:
-            loading_bar.set_value(1.0)  # Set loading to 100% upon completion
-            loading_bar.classes(add='hidden')
-    return wrapper
 
 
-
-@with_loading_bar
 def update_button():
     if fw_content:
         bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content)
@@ -30,13 +16,11 @@ def update_button():
 
 
 
-@with_loading_bar
 def ip_button():
     bmc.set_ip(bmc_ip.value, username.value, password.value)
 
 
 
-@with_loading_bar
 def reset_button():
     bmc.reset_ip(username.value, password.value, bmc_ip.value)
 
@@ -53,7 +37,7 @@ async def choose_file():
         ui.notify("No file selected.")
 
 
-@with_loading_bar
+
 async def flashub_button():
     flash_file = await choose_file()
     if flash_file:
@@ -61,7 +45,6 @@ async def flashub_button():
 
 
 
-@with_loading_bar
 def on_upload(event):
     global fw_content
     fw_content = event.content.read()
