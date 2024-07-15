@@ -9,10 +9,9 @@ flash_file = None
 
 
 def update_button():
-    global progress_bar
     if fw_content:
         progress_bar.visible = True
-        bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, progress_bar)
+        bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content)
     else:
         ui.notify("Please upload a firmware file first.")
 
@@ -45,7 +44,7 @@ async def choose_file():
 async def flashub_button():
     flash_file = await choose_file()
     if flash_file:
-        progress_bar.visable = True
+        progress_bar.visible = True
         bmc.flasher(username.value, password.value, flash_file, your_ip.value)
 
 
