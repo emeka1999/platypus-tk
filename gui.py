@@ -55,15 +55,6 @@ def on_upload(event):
     fw_content = event.content.read()
     ui.notify(f'Uploaded {event.name}')
 
-
-def update_progress(current_step, total_step, status=None):
-    if status == 'cooked':
-        progress_bar.value = 0
-        progress_bar.update()
-        progress_bar.visible = False
-    else:
-        progress_bar.value = current_step / total_step
-        progress_bar.update()
                
 
 with ui.column().classes('absolute-top items-center mt-20'):
