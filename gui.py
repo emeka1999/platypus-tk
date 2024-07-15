@@ -5,8 +5,7 @@ import bmc as bmc
 
 fw_content = None
 flash_file = None
-progress_bar = ui.linear_progress(value=0).classes('w-full')
-progress_bar.visible = False
+
 
 
 def update_button():
@@ -81,7 +80,8 @@ with ui.column().classes('absolute-top items-center mt-20'):
         ui.button('Reset BMC', on_click=reset_button).classes('w-48 h-10 rounded-lg')
         ui.button('Flash U-Boot', on_click=flashub_button).classes('w-48 h-10 rounded-lg')
 with ui.row().classes('absolute-bottom w-full p-4'):
-    progress_bar
+    progress_bar = ui.linear_progress(value=0).classes('w-full')
+    progress_bar.visible = False
 
 ui.run(native=True, dark=True, title='BMC App', window_size=(500, 800), reload=False, port=8000)
 
