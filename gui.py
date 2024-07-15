@@ -10,7 +10,6 @@ flash_file = None
 
 def update_button():
     if fw_content:
-        progress_bar.visible = True
         bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content)
     else:
         ui.notify("Please upload a firmware file first.")
@@ -18,13 +17,11 @@ def update_button():
 
 
 def ip_button():
-    progress_bar.visible = True
     bmc.set_ip(bmc_ip.value, username.value, password.value)
 
 
 
 def reset_button():
-    progress_bar.visible = True
     bmc.reset_ip(username.value, password.value, bmc_ip.value)
 
 
@@ -44,7 +41,6 @@ async def choose_file():
 async def flashub_button():
     flash_file = await choose_file()
     if flash_file:
-        progress_bar.visible = True
         bmc.flasher(username.value, password.value, flash_file, your_ip.value)
 
 
@@ -71,8 +67,8 @@ with ui.column().classes('absolute-top items-center mt-20'):
         ui.button('Reset BMC', on_click=reset_button).classes('w-48 h-10 rounded-lg')
         ui.button('Flash U-Boot', on_click=flashub_button).classes('w-48 h-10 rounded-lg')
 with ui.row().classes('absolute-bottom w-full p-4'):
-    progress_bar = ui.linear_progress(value=0).classes('w-full')
-    progress_bar.visible = False
+    progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-full')
+    progress_bar.visible = True
 
 ui.run(native=True, dark=True, title='BMC App', window_size=(500, 800), reload=False, port=8000)
 
