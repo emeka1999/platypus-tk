@@ -9,9 +9,10 @@ flash_file = None
 
 
 def update_button():
+    global progress_bar
     if fw_content:
         progress_bar.visible = True
-        bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content)
+        bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, progress_bar)
     else:
         ui.notify("Please upload a firmware file first.")
 
@@ -59,7 +60,7 @@ def update_progress(current_step, total_step, status=None):
     if status == 'cooked':
         progress_bar.value = 0
         progress_bar.update()
-        progress_bar.visable = False
+        progress_bar.visible = False
     else:
         progress_bar.value = current_step / total_step
         progress_bar.update()
