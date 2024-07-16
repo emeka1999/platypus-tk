@@ -90,6 +90,6 @@ with ui.row().classes('absolute-bottom w-full p-4'):
     progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-full h-2 rounded-lg')
     progress_bar.visible = True
 
-ui.run(native=False, dark=True, title='BMC App', window_size=(500, 800), reload=False, port=8000)
+ui.run(native=True, dark=True, title='BMC App', window_size=(450, 600), reload=False, port=8000)
 
 
