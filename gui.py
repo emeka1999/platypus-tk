@@ -70,7 +70,7 @@ with ui.column().classes('absolute-top items-center mt-20'):
             bmc_ip = ui.input("BMC IP: ").classes('w-72')
             your_ip = ui.input("IP: ").classes('w-72')
     with ui.row().classes('mt-6'):
-        ui.upload(on_upload=on_upload, label='BMC Firmware Upload')
+        ui.upload(on_upload=on_upload, label='BMC Firmware Upload', auto_upload=True)
     with ui.grid(columns=2):
         ui.button('Update BMC', on_click=update_button).classes('w-48 h-10 rounded-lg')
         ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg')
