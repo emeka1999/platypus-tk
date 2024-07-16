@@ -1,5 +1,6 @@
 from nicegui import app, ui
 import bmc as bmc
+import asyncio
 
 
 
@@ -8,16 +9,25 @@ flash_file = None
 
 
 
-def update_button():
+def update_progress(value):
+    print(f"Updating progress to: {value*100}%")  # Debugging line
+    if value is not None and 0 <= value <= 1:
+        progress_bar.set_value(value)
+    else:
+        print(f"Invalid progress value: {value}")  # Debugging line
+
+
+
+async def update_button():
     if fw_content:
-        bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content)
+        await bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, update_progress)
     else:
         ui.notify("Please upload a firmware file first.")
 
 
 
-def ip_button():
-    bmc.set_ip(bmc_ip.value, username.value, password.value)
+async def ip_button():
+    await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress)
 
 
 

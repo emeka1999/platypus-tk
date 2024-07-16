@@ -6,6 +6,7 @@ import requests
 import threading
 import os
 from http.server import SimpleHTTPRequestHandler, HTTPServer
+import asyncio
 
 
 
@@ -14,37 +15,50 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 
-def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content):
+async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress):
+    print("Initialzing Red Fish client...")
     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
+    callback_progress(0.25)
+    
     try:
-        redfish_client.login()
+        await asyncio.to_thread(redfish_client.login)
         update_service = redfish_client.get("/redfish/v1/UpdateService")
         if update_service.status != 200:
             print("Failed to find the update service.")
             return
 
+        callback_progress(0.50)
+        print("Logged in.")
+
         update_service_url = update_service.dict["@odata.id"]
 
         # Firmware update
         headers = {"Content-Type": "application/octet-stream"}
-        response = redfish_client.post(f"{update_service_url}/update", body=fw_content, headers=headers)
+        print("Sending update request...")
+        response = await asyncio.to_thread(redfish_client.post, f"{update_service_url}/update", body=fw_content, headers=headers)
+        callback_progress(0.75)
 
         if response.status in [200, 202]:
             print("Update initiated successfully:", response.text)
+            callback_progress(1)
         else:
             print("Failed to initiate firmware update. Response code:", response.status)
     except Exception as e:
         print("Error occurred:", e)
     finally:
-        redfish_client.logout()
+        await asyncio.to_thread(redfish_client.logout)
     
+    await asyncio.sleep(5)
+    callback_progress(0)
 
-
-def set_ip(bmc_ip, bmc_user, bmc_pass):
+async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress):
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
     command = f"ifconfig eth0 up {bmc_ip}\n"
+
+    callback_progress(0.25)
+    print("Running...")
 
     try:
         # Check if already logged in by looking for the command prompt
@@ -53,9 +67,12 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
         if b'#' not in initial_prompt:
             # Not logged in, proceed with login
             ser.write(user.encode('utf-8'))
-            time.sleep(2)
+            await asyncio.sleep(2)
             ser.write(passw.encode('utf-8'))
-            time.sleep(5)
+            await asyncio.sleep(2)
+        
+        callback_progress(0.5)
+        print("Logged in.")
 
         # Send the command to set the IP
         ser.write(command.encode('utf-8'))
@@ -63,8 +80,16 @@ def set_ip(bmc_ip, bmc_user, bmc_pass):
         # Reading the response from the command
         response = ser.read_until(b'\n')
         print(response.decode('utf-8'))
+
+        callback_progress(0.75)
+        print("Setting IP...")
     except Exception as e:
         print(f"Error: {e}")
+    
+    callback_progress(1)
+    print("IP set successfully.")
+    await asyncio.sleep(5)
+    callback_progress(0)
 
 
 
