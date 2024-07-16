@@ -66,7 +66,7 @@ def on_upload(event):
     fw_content = event.content.read()
     ui.notify(f'Uploaded {event.name}')
            
-ui.label('Rivan Adhikari').classes('absolute top-0 left-0 text-xs text-gray-800 p-2')
+ui.label('github: https://github.com/rivan2k').classes('absolute top-0 left-0 text-xs text-gray-800 p-2')
 with ui.column().classes('absolute-top items-center mt-20'):
     with ui.row():
         with ui.card(align_items='center').classes('no-shadow border-[0px] w-96 h-75').style('background-color:#121212;'):
