@@ -51,7 +51,7 @@ async def choose_file():
 async def flashub_button():
     flash_file = await choose_file()
     if flash_file:
-        bmc.flasher(username.value, password.value, flash_file, your_ip.value)
+        await bmc.flasher(username.value, password.value, flash_file, your_ip.value, update_progress)
 
 
 

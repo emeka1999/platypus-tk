@@ -110,63 +110,74 @@ def start_server(directory, port):
 
 
 
-def flasher(bmc_user, bmc_pass, flash_file, my_ip):
+async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress):
     directory = os.path.dirname(flash_file)
     file_name = os.path.basename(flash_file)
     port = 5000
 
     start_server(directory, port)
+    callback_progress(0.2)
 
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
 
     try:
-        initial_prompt = ser.read_until(b'# ')
+        initial_prompt = await asyncio.to_thread(ser.read_until, b'# ')
             
         if b'#' not in initial_prompt:
             ser.write(user.encode('utf-8'))
-            time.sleep(2)
+            await asyncio.sleep(2)
             ser.write(passw.encode('utf-8'))
-            time.sleep(5)
+            await asyncio.sleep(5)
         
+        callback_progress(0.4)
+
         url = f"http://{my_ip}:{port}/{file_name}"
         curl_command = f"curl -o {file_name} {url}\n"
         ser.write(curl_command.encode('utf-8'))
-        time.sleep(5)
+        await asyncio.sleep(5)
         print('Curl command sent.')
+
+        callback_progress(0.6)
 
         command = "echo 0 > /sys/block/mmcblk0boot0/force_ro\n"
         ser.write(command.encode('utf-8'))
-        time.sleep(4)
+        await asyncio.sleep(4)
         print('Changed MMC to RW')
+
+        callback_progress(0.8)
 
         command = f'dd if={file_name} of=/dev/mmcblk0boot0 bs=512 seek=256\n'
         ser.write(command.encode('utf-8'))
-        time.sleep(10)
+        await asyncio.sleep(10)
         print("Flashing complete")
+        callback_progress(1)
     except serial.SerialException as e:
         print(f"Serial Error: {e}")
     finally:
         ser.close()
+    callback_progress(0)
 
 
 
-def reset_ip(bmc_user, bmc_pass, bmc_ip):
+async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress):
+    callback_progress(0.4)
     url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
     headers = {"Content-Type": "application/json"}
     payload = {"ResetToDefaultsType": "ResetAll"}
-
+    callback_progress(0.8)
     try:
-        response = requests.post(url, json=payload, headers=headers, auth=(bmc_user, bmc_pass), verify=False)
+        response = await asyncio.to_thread(requests.post, url, json=payload, headers=headers, auth=(bmc_user, bmc_pass), verify=False)
         if response.status_code == 200:
             print("BMC reset to factory defaults successfully.")
+            callback_progress(1)
         else:
             print("Failed to reset BMC. Response code:", response.status_code)
             print(response.json())
     except Exception as e:
         print("Error occurred:", e)
            
-
+    callback_progress(0)
 
    
