@@ -150,7 +150,7 @@ async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress):
 
         command = f'dd if={file_name} of=/dev/mmcblk0boot0 bs=512 seek=256\n'
         ser.write(command.encode('utf-8'))
-        await asyncio.sleep(10)
+        await asyncio.sleep(7)
         print("Flashing complete")
         callback_progress(1)
     except serial.SerialException as e:
