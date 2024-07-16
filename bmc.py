@@ -85,6 +85,7 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress):
     except Exception as e:
         print(f"Error: {e}")
     
+    ser.close()
     callback_progress(1)
     print("IP set successfully.")
     await asyncio.sleep(5)
