@@ -1,6 +1,5 @@
 import urllib3
 import serial
-import time
 import redfish
 import requests
 import threading

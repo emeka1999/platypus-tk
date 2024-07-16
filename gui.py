@@ -1,6 +1,5 @@
 from nicegui import app, ui
 import bmc as bmc
-import asyncio
 
 
 
@@ -19,11 +18,18 @@ def update_progress(value):
 
 
 async def update_button():
-    if fw_content:
+    fw_path = await choose_file()
+    if fw_path:
+        with open(fw_path, 'rb') as fw_file:
+            fw_content = fw_file.read()
         await bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, update_progress)
     else:
         ui.notify("Please upload a firmware file first.")
 
+    # if fw_content:
+    #     await bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, update_progress)
+    # else:
+    #     ui.notify("Please upload a firmware file first.")
 
 
 async def ip_button():
@@ -59,18 +65,22 @@ def on_upload(event):
     global fw_content
     fw_content = event.content.read()
     ui.notify(f'Uploaded {event.name}')
-
-               
-ui.label('Rivan Adhikari').classes('absolute top-0 left-0 text-xs text-gray-600 p-2')
+           
+ui.label('Rivan Adhikari').classes('absolute top-0 left-0 text-xs text-gray-800 p-2')
 with ui.column().classes('absolute-top items-center mt-20'):
     with ui.row():
-        with ui.card().classes('no-shadow border-[1px] w-96 h-75'):
-            username = ui.input("Username: ").classes('w-72 justify-center')
-            password = ui.input('Password: ').classes('w-72').props('type=password')
-            bmc_ip = ui.input("BMC IP: ").classes('w-72')
-            your_ip = ui.input("IP: ").classes('w-72')
-    with ui.row().classes('mt-6'):
-        ui.upload(on_upload=on_upload, label='BMC Firmware Upload', auto_upload=True)
+        with ui.card(align_items='center').classes('no-shadow border-[0px] w-96 h-75').style('background-color:#121212;'):
+            # username = ui.input("Username: ").classes('w-72 justify-center')
+            # password = ui.input('Password: ').classes('w-72').props('type=password')
+            # bmc_ip = ui.input("BMC IP: ").classes('w-72')
+            # your_ip = ui.input("IP (U-Boot): ").classes('w-72')
+
+            username = ui.input(placeholder='Username').classes('w-72').props('rounded outlined dense')
+            password = ui.input(placeholder='Password').classes('w-72').props('rounded outlined dense type=password')
+            bmc_ip = ui.input(placeholder='BMC IP').classes('w-72').props('rounded outlined dense')
+            your_ip = ui.input(placeholder='U-Boot Server IP').classes('w-72').props('rounded outlined dense')
+
+
     with ui.grid(columns=2):
         ui.button('Update BMC', on_click=update_button).classes('w-48 h-10 rounded-lg')
         ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg')
@@ -80,6 +90,6 @@ with ui.row().classes('absolute-bottom w-full p-4'):
     progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-full h-2 rounded-lg')
     progress_bar.visible = True
 
-ui.run(native=True, dark=True, title='BMC App', window_size=(500, 800), reload=False, port=8000)
+ui.run(native=False, dark=True, title='BMC App', window_size=(500, 800), reload=False, port=8000)
 
 
