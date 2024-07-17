@@ -28,23 +28,14 @@ async def update_button():
     if fw_path:
         with open(fw_path, 'rb') as fw_file:
             fw_content = fw_file.read()
-        await bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, update_progress)
+        await bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, update_progress, output_message)
     else:
         ui.notify("Please upload a firmware file first.")
 
-    # if fw_content:
-    #     await bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, update_progress)
-    # else:
-    #     ui.notify("Please upload a firmware file first.")
 
 
 async def ip_button():
     await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
-
-
-
-def reset_button():
-    bmc.reset_ip(username.value, password.value, bmc_ip.value)
 
 
 
@@ -63,7 +54,11 @@ async def choose_file():
 async def flashub_button():
     flash_file = await choose_file()
     if flash_file:
-        await bmc.flasher(username.value, password.value, flash_file, your_ip.value, update_progress)
+        await bmc.flasher(username.value, password.value, flash_file, your_ip.value, update_progress, output_message)
+
+
+def reset_button():
+    bmc.reset_ip(username.value, password.value, bmc_ip.value, update_progress, output_message)
 
 
 

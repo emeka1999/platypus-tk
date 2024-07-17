@@ -14,8 +14,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 
-async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress):
-    print("Initialzing Red Fish client...")
+async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, callback_output):
+    callback_output("Initialzing Red Fish client...")
     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
     callback_progress(0.25)
     
@@ -23,27 +23,27 @@ async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress):
         await asyncio.to_thread(redfish_client.login)
         update_service = redfish_client.get("/redfish/v1/UpdateService")
         if update_service.status != 200:
-            print("Failed to find the update service.")
+            callback_output("Failed to find the update service.")
             return
 
         callback_progress(0.50)
-        print("Logged in.")
+        callback_output("Logged in.")
 
         update_service_url = update_service.dict["@odata.id"]
 
         # Firmware update
         headers = {"Content-Type": "application/octet-stream"}
-        print("Sending update request...")
+        callback_output("Sending update request...")
         response = await asyncio.to_thread(redfish_client.post, f"{update_service_url}/update", body=fw_content, headers=headers)
         callback_progress(0.75)
 
         if response.status in [200, 202]:
-            print("Update initiated successfully:", response.text)
+            callback_output("Update initiated successfully:", response.text)
             callback_progress(1)
         else:
-            print("Failed to initiate firmware update. Response code:", response.status)
+            callback_output("Failed to initiate firmware update. Response code:", response.status)
     except Exception as e:
-        print("Error occurred:", e)
+        callback_output("Error occurred:", e)
     finally:
         await asyncio.to_thread(redfish_client.logout)
     
@@ -95,10 +95,10 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
 
 server_running = False
 
-def start_server(directory, port):
+def start_server(directory, port, callback_output):
     global server_running
     if server_running:
-        print("Server is already running.")
+        callback_output("Server is already running.")
         return
 
     os.chdir(directory)
@@ -106,16 +106,16 @@ def start_server(directory, port):
     httpd = HTTPServer(('0.0.0.0', port), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     server_running = True
-    print(f"Serving files from {directory} on port {port}")
+    callback_output(f"Serving files from {directory} on port {port}")
 
 
 
-async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress):
+async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress, callback_output):
     directory = os.path.dirname(flash_file)
     file_name = os.path.basename(flash_file)
     port = 5000
 
-    start_server(directory, port)
+    start_server(directory, port, callback_output)
     callback_progress(0.2)
 
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
@@ -137,31 +137,31 @@ async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress):
         curl_command = f"curl -o {file_name} {url}\n"
         ser.write(curl_command.encode('utf-8'))
         await asyncio.sleep(5)
-        print('Curl command sent.')
+        callback_output('Curl command sent.')
 
         callback_progress(0.6)
 
         command = "echo 0 > /sys/block/mmcblk0boot0/force_ro\n"
         ser.write(command.encode('utf-8'))
         await asyncio.sleep(4)
-        print('Changed MMC to RW')
+        callback_output('Changed MMC to RW')
 
         callback_progress(0.8)
 
         command = f'dd if={file_name} of=/dev/mmcblk0boot0 bs=512 seek=256\n'
         ser.write(command.encode('utf-8'))
         await asyncio.sleep(7)
-        print("Flashing complete")
+        callback_output("Flashing complete")
         callback_progress(1)
     except serial.SerialException as e:
-        print(f"Serial Error: {e}")
+        callback_output(f"Serial Error: {e}")
     finally:
         ser.close()
     callback_progress(0)
 
 
 
-async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress):
+async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress, callback_output):
     callback_progress(0.4)
     url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
     headers = {"Content-Type": "application/json"}
@@ -170,13 +170,13 @@ async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress):
     try:
         response = await asyncio.to_thread(requests.post, url, json=payload, headers=headers, auth=(bmc_user, bmc_pass), verify=False)
         if response.status_code == 200:
-            print("BMC reset to factory defaults successfully.")
+            callback_output("BMC reset to factory defaults successfully.")
             callback_progress(1)
         else:
-            print("Failed to reset BMC. Response code:", response.status_code)
-            print(response.json())
+            callback_output("Failed to reset BMC. Response code:", response.status_code)
+            callback_output(response.json())
     except Exception as e:
-        print("Error occurred:", e)
+        callback_output("Error occurred:", e)
            
     callback_progress(0)
 
