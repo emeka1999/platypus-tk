@@ -50,14 +50,14 @@ async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress):
     await asyncio.sleep(5)
     callback_progress(0)
 
-async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress):
+async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output):
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
     command = f"ifconfig eth0 up {bmc_ip}\n"
 
     callback_progress(0.25)
-    print("Running...")
+    callback_output("Running...")
 
     try:
         # Check if already logged in by looking for the command prompt
@@ -71,23 +71,23 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress):
             await asyncio.sleep(2)
         
         callback_progress(0.5)
-        print("Logged in.")
+        callback_output("Logged in.")
 
         # Send the command to set the IP
         ser.write(command.encode('utf-8'))
 
         # Reading the response from the command
         response = ser.read_until(b'\n')
-        print(response.decode('utf-8'))
+        callback_output(response.decode('utf-8'))
 
         callback_progress(0.75)
-        print("Setting IP...")
+        callback_output("Setting IP...")
     except Exception as e:
-        print(f"Error: {e}")
+        callback_output(f"Error: {e}")
     
     ser.close()
     callback_progress(1)
-    print("IP set successfully.")
+    callback_output("IP set successfully.")
     await asyncio.sleep(5)
     callback_progress(0)
 
