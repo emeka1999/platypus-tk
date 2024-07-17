@@ -9,11 +9,11 @@ flash_file = None
 
 
 def update_progress(value):
-    print(f"Updating progress to: {value*100}%")  # Debugging line
+    print(f"Updating progress to: {value*100}%")
     if value is not None and 0 <= value <= 1:
         progress_bar.set_value(value)
     else:
-        print(f"Invalid progress value: {value}")  # Debugging line
+        print(f"Invalid progress value: {value}")
 
 
 
