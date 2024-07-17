@@ -14,10 +14,13 @@ def output_message(message):
     status.push(message)
 
 
-def update_progress(value):
-    output_message(f"Updating progress to: {value*100}%")
+def update_progress(value, reset=None):
     if value is not None and 0 <= value <= 1:
-        progress_bar.set_value(value)
+        if reset:
+            progress_bar.set_value(value)
+        else:
+            progress_bar.set_value(value)
+            output_message(f"progress: {value*100}%")
     else:
         output_message(f"Invalid progress value: {value}")
 
