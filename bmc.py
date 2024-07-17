@@ -50,6 +50,8 @@ async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, 
     await asyncio.sleep(5)
     callback_progress(0)
 
+
+
 async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output):
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
     user = f"{bmc_user}\n"

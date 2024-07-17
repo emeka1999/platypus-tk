@@ -14,6 +14,7 @@ def output_message(message):
     status.push(message)
 
 
+
 def update_progress(value):
     if value is not None and 0 <= value <= 1:
             progress_bar.set_value(value)
@@ -57,6 +58,7 @@ async def flashub_button():
         await bmc.flasher(username.value, password.value, flash_file, your_ip.value, update_progress, output_message)
 
 
+
 def reset_button():
     bmc.reset_ip(username.value, password.value, bmc_ip.value, update_progress, output_message)
 
@@ -66,7 +68,9 @@ def on_upload(event):
     global fw_content
     fw_content = event.content.read()
     ui.notify(f'Uploaded {event.name}')
-           
+
+
+
 ui.label('https://github.com/rivan2k').classes('absolute top-0 left-0 text-xs text-gray-800 p-2')
 with ui.card(align_items='center').classes('no-shadow border-[0px] w-96 h-75').style('background-color:#121212; margin: 0 auto; margin-top: 15px;'):
     username = ui.input(placeholder='Username').classes('w-72').props('rounded outlined dense')
@@ -83,7 +87,6 @@ with ui.grid(columns=2).style('margin: 0 auto;'):
 status = ui.log().classes('h-75 w-86').style('margin: 0 auto; margin-top: 15px;')
 progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-4/5 h-2 rounded-lg absolute-bottom').style('margin: 0 auto; margin-bottom: 5px')
 progress_bar.visible = True
-
 
 ui.run(native=True, dark=True, title='BMC App', window_size=(500, 800), reload=False, port=8000)
 
