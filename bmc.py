@@ -43,7 +43,7 @@ async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, 
         else:
             callback_output("Failed to initiate firmware update. Response code:", response.status)
     except Exception as e:
-        callback_output("Error occurred:", e)
+        callback_output(f"Error: {e}")
     finally:
         await asyncio.to_thread(redfish_client.logout)
     
