@@ -9,6 +9,7 @@ import asyncio
 
 
 
+
 # Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -51,6 +52,32 @@ async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, 
     callback_progress(0)
 
 
+
+def bmc_info(bmc_ip, bmc_user, bmc_pass):
+    try:
+        # Initialize the Redfish client
+        redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
+        
+        # Login to the Redfish service
+        redfish_client.login(auth="session")
+        
+        # Fetch the BMC information
+        response = redfish_client.get("/redfish/v1/Managers/bmc")
+        
+        if response.status == 200:
+            bmc_info = response.dict
+            #print(bmc_info)
+            return(bmc_info)
+        else:
+            print(f"Failed to fetch BMC information. Status code: {response.status}")
+            return None
+        
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        return None
+    finally:
+        # Logout to release the session
+        redfish_client.logout()
 
 async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output):
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
