@@ -6,6 +6,12 @@ from datetime import datetime
 
 fw_content = None
 flash_file = None
+username = None
+password = None
+bmc_ip = None
+status = None
+progress_bar = None
+your_ip = None
 
 
 
@@ -71,22 +77,44 @@ def on_upload(event):
 
 
 
-ui.label('https://github.com/rivan2k').classes('absolute top-0 left-0 text-xs text-gray-800 p-2')
-with ui.card(align_items='center').classes('no-shadow border-[0px] w-96 h-75').style('background-color:#121212; margin: 0 auto; margin-top: 15px;'):
-    username = ui.input(placeholder='Username').classes('w-72').props('rounded outlined dense')
-    password = ui.input(placeholder='Password').classes('w-72').props('rounded outlined dense type=password')
-    bmc_ip = ui.input(placeholder='BMC IP').classes('w-72').props('rounded outlined dense')
-    your_ip = ui.input(placeholder='U-Boot Server IP').classes('w-72').props('rounded outlined dense')
+@ui.page('/bmc_info')
+def bmc_info():
+    ui.label('https://github.com/rivan2k').classes('absolute top-0 left-0 text-xs text-gray-800 p-2')
+    with ui.row().classes('w-full items-center'):
+        result = ui.label().classes('mr-auto')
+        with ui.button(icon='menu'):
+            with ui.menu().props('auto-close') as menu:
+                ui.menu_item('Home', lambda: ui.open('/'))
+                ui.menu_item('BMC Information', lambda: ui.open('/bmc_info'))
+                ui.separator()
+                ui.menu_item('Close', menu.close)
 
-# Row for grid of buttons
-with ui.grid(columns=2).style('margin: 0 auto;'):
-    ui.button('Update BMC', on_click=update_button).classes('w-48 h-10 rounded-lg')
-    ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg')
-    ui.button('Reset BMC', on_click=reset_button).classes('w-48 h-10 rounded-lg')
-    ui.button('Flash U-Boot', on_click=flashub_button).classes('w-48 h-10 rounded-lg')
-status = ui.log().classes('h-75 w-86').style('margin: 0 auto; margin-top: 15px;')
-progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-4/5 h-2 rounded-lg absolute-bottom').style('margin: 0 auto; margin-bottom: 5px')
-progress_bar.visible = True
+@ui.page('/')
+def home():
+    ui.label('https://github.com/rivan2k').classes('absolute top-0 left-0 text-xs text-gray-800 p-2')
+    with ui.row().classes('w-full items-center'):
+        result = ui.label().classes('mr-auto')
+        with ui.button(icon='menu'):
+            with ui.menu().props('auto-close') as menu:
+                ui.menu_item('Home', lambda: ui.open('/'))
+                ui.menu_item('BMC Information', lambda: ui.open('/bmc_info'))
+                ui.separator()
+                ui.menu_item('Close', menu.close)
+    with ui.card(align_items='center').classes('no-shadow border-[0px] w-96 h-75').style('background-color:#121212; margin: 0 auto; margin-top: 15px;'):
+        username = ui.input(placeholder='Username').classes('w-72').props('rounded outlined dense')
+        password = ui.input(placeholder='Password').classes('w-72').props('rounded outlined dense type=password')
+        bmc_ip = ui.input(placeholder='BMC IP').classes('w-72').props('rounded outlined dense')
+        your_ip = ui.input(placeholder='U-Boot Server IP').classes('w-72').props('rounded outlined dense')
+
+    # Row for grid of buttons
+    with ui.grid(columns=2).style('margin: 0 auto;'):
+        ui.button('Update BMC', on_click=update_button).classes('w-48 h-10 rounded-lg')
+        ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg')
+        ui.button('Reset BMC', on_click=reset_button).classes('w-48 h-10 rounded-lg')
+        ui.button('Flash U-Boot', on_click=flashub_button).classes('w-48 h-10 rounded-lg')
+    status = ui.log().classes('h-75 w-86').style('margin: 0 auto; margin-top: 15px;')
+    progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-4/5 h-2 rounded-lg absolute-bottom').style('margin: 0 auto; margin-bottom: 5px')
+    progress_bar.visible = True
 
 ui.run(native=True, dark=True, title='BMC App', window_size=(500, 800), reload=False, port=8000)
 
