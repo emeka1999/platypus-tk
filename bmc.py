@@ -6,6 +6,7 @@ import threading
 import os
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 import asyncio
+import time
 
 
 
@@ -74,31 +75,76 @@ async def monitor_task(redfish_client, task_url, callback_output, callback_progr
 
 
 
-def bmc_info(bmc_ip, bmc_user, bmc_pass):
+def bmc_info():
     try:
-        # Initialize the Redfish client
-        redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
-        
-        # Login to the Redfish service
-        redfish_client.login(auth="session")
-        
-        # Fetch the BMC information
-        response = redfish_client.get("/redfish/v1/Managers/bmc")
-        
-        if response.status == 200:
-            bmc_info = response.dict
-            #print(bmc_info)
-            return(bmc_info)
-        else:
-            print(f"Failed to fetch BMC information. Status code: {response.status}")
-            return None
-        
+        # Initialize serial connection
+        with serial.Serial('/dev/ttyUSB0', 115200, timeout=1) as ser:
+            # Wait for the connection to be established
+            time.sleep(2)  # Wait for the connection to be established
+            
+            # Clear the input buffer to remove any old data
+            ser.flushInput()
+            
+            # Send a simple command to check BMC response
+            commands = [b'help\n', b'status\n', b'\n']
+            for command in commands:
+                ser.write(command)
+                time.sleep(5)  # Wait for BMC to respond
+
+                # Read the response
+                response = ser.read_all().decode('utf-8')
+                print(f"Raw response for command '{command.decode().strip()}': '{response}'")
+
+                if response:
+                    if 'help' in response.lower() or 'status' in response.lower():
+                        print("BMC is on and responding.")
+                        return True
+                    else:
+                        print("BMC is responding but not with expected output.")
+                        return False
+
+            print("BMC is not responding.")
+            return False
+
+    except serial.SerialException as e:
+        print(f"Serial communication error: {e}")
+        return False
+
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
-        return None
-    finally:
-        # Logout to release the session
-        redfish_client.logout()
+        print(f"An unexpected error occurred: {e}")
+        return False
+
+
+
+
+    # try:
+    #     # Initialize the Redfish client
+    #     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
+        
+    #     # Login to the Redfish service
+    #     redfish_client.login(auth="session")
+        
+    #     # Fetch the BMC information
+    #     response = redfish_client.get("/redfish/v1/Managers/bmc")
+        
+    #     if response.status == 200:
+    #         bmc_info = response.dict
+    #         #print(bmc_info)
+    #         return(bmc_info)
+    #     else:
+    #         print(f"Failed to fetch BMC information. Status code: {response.status}")
+    #         return None
+        
+    # except Exception as e:
+    #     print(f"An error occurred: {str(e)}")
+    #     return None
+    # finally:
+    #     # Logout to release the session
+    #     redfish_client.logout()
+
+
+
+
 
 async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output):
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
@@ -110,10 +156,14 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
     callback_output("Running...")
 
     try:
+        time.sleep(2)
+        ser.flushInput()
+        ser.write(b"\n")
         # Check if already logged in by looking for the command prompt
-        initial_prompt = ser.read_until(b'# ')
+        initial_prompt = ser.read_all().decode('utf-8')
+        print(f'Prompt: {initial_prompt}')
             
-        if b'#' not in initial_prompt:
+        if '#' not in initial_prompt:
             # Not logged in, proceed with login
             ser.write(user.encode('utf-8'))
             await asyncio.sleep(2)

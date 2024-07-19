@@ -80,8 +80,8 @@ def on_upload(event):
 
 
 def load_info():
-    info = bmc.bmc_info(bmc_ip.value, username.value, password.value)
-    update_ui_info(info)
+    info = bmc.bmc_info()
+    #update_ui_info(info)
     
 
 
