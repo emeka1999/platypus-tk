@@ -16,7 +16,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, callback_output):
-    callback_output("Initialzing Red Fish client...")
+    callback_output("Initializing Red Fish client...")
     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
     callback_progress(0.25)
     
@@ -39,10 +39,11 @@ async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, 
         callback_progress(0.75)
 
         if response.status in [200, 202]:
-            callback_output("Update initiated successfully:", response.text)
-            callback_progress(1)
+            callback_output(f"Update initiated successfully: {response.text}")
+            task_url = response.dict["@odata.id"]
+            await monitor_task(redfish_client, task_url, callback_output, callback_progress)
         else:
-            callback_output("Failed to initiate firmware update. Response code:", response.status)
+            callback_output(f"Failed to initiate firmware update. Response code: {response.status}")
     except Exception as e:
         callback_output(f"Error: {e}")
     finally:
@@ -50,6 +51,26 @@ async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, 
     
     await asyncio.sleep(5)
     callback_progress(0)
+
+
+
+async def monitor_task(redfish_client, task_url, callback_output, callback_progress):
+    while True:
+        task_response = await asyncio.to_thread(redfish_client.get, task_url)
+        if task_response.status != 200:
+            callback_output("Failed to get task status.")
+            break
+
+        task_status = task_response.dict["TaskState"]
+        callback_output(f"Task status: {task_status}")
+
+        if task_status in ["Completed", "Exception", "Killed"]:
+            if task_status == 'Completed':
+                callback_progress(1)
+            callback_output(f"Task completed with status: {task_status}")
+            break
+
+        await asyncio.sleep(5)
 
 
 
