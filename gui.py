@@ -33,19 +33,9 @@ async def update_button():
     else:
         ui.notify("Please upload a firmware file first.", position='top')
 
-def update_ui_info(info):
-    if info:
-        health_label.set_text(f"Health: {info.get('Status', {}).get('Health', 'Unknown')}")
-        power_label.set_text(f"Power: {info.get('PowerState', 'Unknown')}")
-        firmware_version_label.set_text(f"Firmware Version: {info.get('FirmwareVersion', 'Unknown')}")
-        name_model_text = f"Device: {info.get('Manufacturer', 'Unknown')} {info.get('Model', 'Unknown')}"
-        manufacturer_model.set_text(name_model_text)
-
-
 
 async def ip_button():
     await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
-
 
 
 async def choose_file():
@@ -79,10 +69,19 @@ def on_upload(event):
 
 
 
+def update_ui_info(info):
+    if info:
+        health_label.set_text(f"Health: {info.get('Status', {}).get('Health', 'Unknown')}")
+        power_label.set_text(f"Power: {info.get('PowerState', 'Unknown')}")
+        firmware_version_label.set_text(f"Firmware Version: {info.get('FirmwareVersion', 'Unknown')}")
+        name_model_text = f"Device: {info.get('Manufacturer', 'Unknown')} {info.get('Model', 'Unknown')}"
+        manufacturer_model.set_text(name_model_text)
+
+
+
 def load_info():
-    info = bmc.bmc_info()
-    #update_ui_info(info)
-    
+    info = bmc.bmc_info(username.value, password.value, bmc_ip.value)
+    update_ui_info(info)   
 
 
 
