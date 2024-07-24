@@ -6,6 +6,7 @@ import threading
 import os
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 import asyncio
+import time
 
 
 
@@ -238,3 +239,53 @@ async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress, callback_outpu
     callback_progress(0)
 
    
+
+def read_serial_data(ser, command, delay=2):
+    """Function to handle blocking serial operations."""
+    try:
+        # Give some time for the serial device to be ready
+        time.sleep(delay)
+        
+        # Write the command to the serial port
+        ser.write(command.encode('utf-8'))
+        time.sleep(2)  # Wait for the response
+        
+        # Read the data from the serial port
+        response = ser.read_all().decode('utf-8')
+        return response
+    except Exception as e:
+        print(f"Error reading serial data: {e}")
+        return ""
+
+
+
+async def grab_ip(bmc_user, bmc_pass):
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    user = f"{bmc_user}\n"
+    passw = f"{bmc_pass}\n"
+    command = "ifconfig eth0\n"
+
+    try:
+        # Login and execute the command
+        await asyncio.to_thread(ser.write, b'\n')
+        await asyncio.to_thread(ser.write, user.encode('utf-8'))
+        await asyncio.sleep(2)
+        await asyncio.to_thread(ser.write, passw.encode('utf-8'))
+        await asyncio.sleep(2)
+        
+        # Execute command and read response
+        response = await asyncio.to_thread(read_serial_data, ser, command)
+        print(f"Response: {response}")
+
+        # Parse the response to find the IP address
+        lines = response.split('\n')
+        for line in lines:
+            if 'inet ' in line and 'inet6' not in line:
+                ip_address = line.split()[1]
+                print(ip_address)
+        return None
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+    finally:
+        ser.close()
