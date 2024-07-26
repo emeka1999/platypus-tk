@@ -3,6 +3,5 @@ urllib3
 pyserial
 redfish
 requests
-aiohttp
 serial
 asyncio
