@@ -4,4 +4,5 @@ pyserial
 redfish
 requests
 aiohttp
-serial-asyncio
+serial
+asyncio
