@@ -81,19 +81,28 @@ def update_ui_info(info):
 
 
 def update_ip(current_ip):
-    ip_label.set_text(f"Current IP Addres: {current_ip}")
-
-
-
-def load_info():
-    info = bmc.bmc_info(username.value, password.value, bmc_ip.value)
-    update_ui_info(info)
+    ip_label.set_text(f"Current IP Address: {current_ip}")
 
 
 
 async def load_ip():
     current_ip = await bmc.grab_ip(username.value, password.value)
     update_ip(current_ip)
+
+
+
+async def load_info():
+    if bmc_ip.value:
+        info = bmc.bmc_info(username.value, password.value, bmc_ip.value)
+        update_ui_info(info)
+    await load_ip()
+
+
+
+async def emmc_button():
+    flash_file = await choose_file()
+    if flash_file:
+        await bmc.flash_emmc(username.value, password.value, bmc_ip.value, flash_file,  your_ip.value, output_message)
 
 
 
@@ -125,13 +134,14 @@ with ui.row().classes('w-full items-start'):
     # 2nd column
     with ui.card(align_items='start').classes('no-shadow border-[0px] w-96 h-75').style('background-color:#121212; margin-left: 15px; margin-top: 15px;'):
         ui.label('BMC Information:').classes('text-left').style('font-size: 20px;')
-        ui.button("Load info", on_click=load_ip)
+        ui.button("Load info", on_click=load_info)
         with ui.column():
             manufacturer_model = ui.label('Device: ').classes('w-72')
             power_label = ui.label('Power State: ').classes('w-72')
             health_label = ui.label('Health: ').classes('w-72')
             firmware_version_label = ui.label('Firmware Version: ').classes('w-72')
             ip_label = ui.label('Current IP Address: ').classes('w-72')
+        ui.button('Flash eMMC', on_click=emmc_button).classes('w-48 h-10 rounded-lg')
 
         
 
@@ -140,4 +150,4 @@ progress_bar.visible = True
 
 app.native.window_args['resizable'] = False
 
-ui.run(native=True, dark=True, title='Platypus', window_size=(850, 750), reload=False, port=8001)
+ui.run(native=True, dark=True, title='Platypus', window_size=(850, 750), reload=False, port=8000)

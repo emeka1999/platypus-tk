@@ -11,6 +11,7 @@ import time
 
 
 
+
 # Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -281,11 +282,69 @@ async def grab_ip(bmc_user, bmc_pass):
         lines = response.split('\n')
         for line in lines:
             if 'inet ' in line and 'inet6' not in line:
-                ip_address = line.split()[1]
+                part = line.split(':')[1]
+                ip_address = part.split()[0]
                 print(ip_address)
-        return None
+        return ip_address
     except Exception as e:
         print(f"Error: {e}")
         return None
     finally:
         ser.close()
+
+
+
+async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_output):
+    directory = os.path.dirname(flash_file)
+    file_name = os.path.basename(flash_file)
+    port = 80
+    command = 'reboot\n'
+
+    start_server(directory, port, callback_output)
+
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    user = f"{bmc_user}\n"
+    passw = f"{bmc_pass}\n"
+
+    try:
+        ser.write(b'\n')
+        await asyncio.sleep(2)
+        ser.write(user.encode('utf-8'))
+        await asyncio.sleep(2)
+        ser.write(passw.encode('utf-8'))
+        await asyncio.sleep(5)
+        
+        ser.write(command.encode('utf-8'))
+        await asyncio.sleep(5)
+
+        # while True:
+        #     line = ser.readline().decode('utf-8', errors='replace')
+        #     print(line)
+        #     if 'Hit any key' in line:
+        #         ser.write(b'\n')
+        #         break
+        await asyncio.sleep(2)
+        ser.write(f'setenv ipaddr {bmc_ip}\n'.encode('utf-8'))
+        await asyncio.sleep(2)
+        ser.write(f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-nanobmc.itb; bootm\n'.encode('utf-8'))
+        await asyncio.sleep(35)
+        command = f'ifconfig eth0 up {bmc_ip}\n'
+        ser.write(command.encode('utf-8'))
+        await asyncio.sleep(2)
+        curl_command = f"curl -o obmc-phosphor-image-snuc-nanobmc.wic.xz {my_ip}/obmc-phosphor-image-snuc-nanobmc.wic.xz\n"
+        ser.write(curl_command.encode('utf-8'))
+        await asyncio.sleep(5)
+        curl_command = f'curl -o obmc-phosphor-image-snuc-nanobmc.wic.bmap {my_ip}/obmc-phosphor-image-snuc-nanobmc.wic.bmap\n'
+        await asyncio.sleep(5)
+        ser.write(curl_command.encode('utf-8'))
+        await asyncio.sleep(5)
+        ser.write(f'bmaptool copy obmc-phosphor-image-snuc-nanobmc.wic.xz /dev/mmcblk0\n'.encode('utf-8'))
+        await asyncio.sleep(30)
+        print('done')
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+    finally:
+        ser.close()
+    
