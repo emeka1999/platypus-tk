@@ -301,14 +301,14 @@ async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_out
 
     start_server(directory, port, callback_output)
 
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)  # Reduced timeout for faster polling
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
     newline = '\n'
 
     try:
         ser.write(b'\n')
-        await asyncio.sleep(2)
+        await asyncio.sleep(2)  
         ser.write(user.encode('utf-8'))
         await asyncio.sleep(2)
         ser.write(passw.encode('utf-8'))
@@ -317,15 +317,27 @@ async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_out
         ser.write(command.encode('utf-8'))
         await asyncio.sleep(5)
 
-        while True:
-            line = ser.readline().decode('utf-8', errors='replace').strip()
-            print(line)
-            if 'Hit any key to stop autoboot' in line:
-                ser.write(b'\n')
-                ser.flush()
-                break
-            await asyncio.sleep(0.1)
-            
+        # Start a task to detect the "Hit any key" prompt
+        async def detect_prompt():
+            start_time = time.time()
+            while time.time() - start_time < 3:  # 3 seconds window
+                while ser.in_waiting > 0:
+                    line = ser.readline().decode('utf-8', errors='replace').strip()
+                    print(line)
+                    if 'autoboot' in line:
+                        ser.write(b' ')  # Send a space character to simulate a key press
+                        ser.flush()
+                        return True
+                await asyncio.sleep(0.01)  # Short sleep to avoid busy-waiting
+            return False
+
+        # Run the detection task concurrently
+        prompt_detected = await detect_prompt()
+
+        if not prompt_detected:
+            print("Failed to detect 'Hit any key to stop autoboot' prompt in time.")
+            return
+
         await asyncio.sleep(2)
         ser.write(f'setenv ipaddr {bmc_ip}\n'.encode('utf-8'))
         await asyncio.sleep(2)
@@ -346,3 +358,4 @@ async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_out
         print('done')
     finally:
         ser.close()
+
