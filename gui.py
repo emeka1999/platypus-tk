@@ -7,13 +7,14 @@ fw_content = None
 flash_file = None
 
 
-
+# Displays messages in terminal and in the ui 
 def output_message(message):
     print(message)
     status.push(message)
 
 
 
+# Updates the value of the progress bar 
 def update_progress(value):
     if value is not None and 0 <= value <= 1:
             progress_bar.set_value(value)
@@ -23,6 +24,7 @@ def update_progress(value):
 
 
 
+# Checks for firmware file before flashing the firmware file 
 async def update_button():
     fw_path = await choose_file()
     if fw_path:
@@ -34,11 +36,13 @@ async def update_button():
 
 
 
+# Initiates setting temporary ip address
 async def ip_button():
     await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
 
 
 
+# Opens a file dialog -> returns path only
 async def choose_file():
     global flash_file
     files = await app.native.main_window.create_file_dialog(allow_multiple=False)
@@ -51,13 +55,14 @@ async def choose_file():
 
 
 
+# Pick a file before initiating flashing the U-Boot 
 async def flashub_button():
     flash_file = await choose_file()
     if flash_file:
         await bmc.flasher(username.value, password.value, flash_file, your_ip.value, update_progress, output_message)
 
 
-
+# Calls the network wipe 
 async def reset_button():
     await bmc.reset_ip(username.value, password.value, bmc_ip.value, update_progress, output_message)
 
@@ -70,6 +75,7 @@ def on_upload(event):
 
 
 
+# orgainzes various information regarding the bmc
 def update_ui_info(info):
     if info:
         health_label.set_text(f"Health: {info.get('Status', {}).get('Health', 'Unknown')}")
@@ -80,17 +86,19 @@ def update_ui_info(info):
 
 
 
+# Updates the ui to display the current ip address
 def update_ip(current_ip):
     ip_label.set_text(f"Current IP Address: {current_ip}")
 
 
 
+# Grabs the current ip address of the bmc 
 async def load_ip():
     current_ip = await bmc.grab_ip(username.value, password.value)
     update_ip(current_ip)
 
 
-
+# Grabs various information regarding the bmc
 async def load_info():
     if bmc_ip.value:
         info = bmc.bmc_info(username.value, password.value, bmc_ip.value)
@@ -99,6 +107,7 @@ async def load_info():
 
 
 
+# Pick a file before initiating factory reset 
 async def emmc_button():
     flash_file = await choose_file()
     if flash_file:

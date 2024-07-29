@@ -14,6 +14,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 
+# Updates the BMC firmware through redfish 
 async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, callback_output):
     callback_output("Initializing Red Fish client...")
     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
@@ -52,6 +53,7 @@ async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, 
 
 
 
+# Continuously grabs that status of a redfish task 
 async def monitor_task(redfish_client, task_url, callback_output, callback_progress):
     while True:
         task_response = await asyncio.to_thread(redfish_client.get, task_url)
@@ -72,6 +74,7 @@ async def monitor_task(redfish_client, task_url, callback_output, callback_progr
 
 
 
+# Grabs various information regarding the bmc through redfish 
 def bmc_info(bmc_user, bmc_pass, bmc_ip):
     try:
         redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
@@ -91,6 +94,7 @@ def bmc_info(bmc_user, bmc_pass, bmc_ip):
 
 
 
+# Sets a temporary ip address to the bmc through serial 
 async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output):
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
     user = f"{bmc_user}\n"
@@ -135,6 +139,7 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
 
 server_running = False
 
+# Starts a server based on a particular directory 
 def start_server(directory, port, callback_output):
     global server_running
     if server_running:
@@ -150,6 +155,7 @@ def start_server(directory, port, callback_output):
 
 
 
+# Flashes the U-Boot of the BMC through serial 
 async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress, callback_output):
     directory = os.path.dirname(flash_file)
     file_name = os.path.basename(flash_file)
@@ -164,7 +170,6 @@ async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress, call
 
     try:
         initial_prompt = await asyncio.to_thread(ser.read_until, b'# ')
-            
 
         ser.write(user.encode('utf-8'))
         await asyncio.sleep(2)
@@ -201,6 +206,7 @@ async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress, call
 
 
 
+# Wipes all BMC network settings 
 async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress, callback_output):
     callback_progress(0.4)
     url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
@@ -222,6 +228,7 @@ async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress, callback_outpu
 
    
 
+# Reads serial response for a particular command
 def read_serial_data(ser, command, delay=2):
     try:
         time.sleep(delay)
@@ -235,6 +242,7 @@ def read_serial_data(ser, command, delay=2):
 
 
 
+# Grabs the current ip address of the bmc
 async def grab_ip(bmc_user, bmc_pass):
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
     user = f"{bmc_user}\n"
@@ -266,6 +274,8 @@ async def grab_ip(bmc_user, bmc_pass):
 
 
 
+# Factory resets the BMC through serial - only works with nano bmc 
+#TODO mos bmc compatibility 
 async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_output):
     directory = os.path.dirname(flash_file)
     port = 80
