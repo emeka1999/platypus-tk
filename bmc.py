@@ -10,9 +10,6 @@ import time
 
 
 
-
-
-# Suppress the warning for unverified HTTPS requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
@@ -34,7 +31,6 @@ async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, 
 
         update_service_url = update_service.dict["@odata.id"]
 
-        # Firmware update
         headers = {"Content-Type": "application/octet-stream"}
         callback_output("Sending update request...")
         response = await asyncio.to_thread(redfish_client.post, f"{update_service_url}/update", body=fw_content, headers=headers)
@@ -78,31 +74,20 @@ async def monitor_task(redfish_client, task_url, callback_output, callback_progr
 
 def bmc_info(bmc_user, bmc_pass, bmc_ip):
     try:
-        # Initialize the Redfish client
         redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
-        
-        # Login to the Redfish service
         redfish_client.login(auth="session")
-        
-        # Fetch the BMC information
         response = redfish_client.get("/redfish/v1/Managers/bmc")
-        
         if response.status == 200:
             bmc_info = response.dict
-            #print(bmc_info)
             return(bmc_info)
         else:
             print(f"Failed to fetch BMC information. Status code: {response.status}")
             return None
-        
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return None
     finally:
-        # Logout to release the session
         redfish_client.logout()
-
-
 
 
 
@@ -118,12 +103,10 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
     try:
         ser.flushInput()
         ser.write(b"\n")
-        # Check if already logged in by looking for the command prompt
         initial_prompt = ser.read_all().decode('utf-8')
         print(f'Prompt: {initial_prompt}')
             
         if '#' not in initial_prompt:
-            # Not logged in, proceed with login
             ser.write(user.encode('utf-8'))
             await asyncio.sleep(2)
             ser.write(passw.encode('utf-8'))
@@ -132,10 +115,8 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
         callback_progress(0.5)
         callback_output("Logged in.")
 
-        # Send the command to set the IP
         ser.write(command.encode('utf-8'))
 
-        # Reading the response from the command
         response = ser.read_until(b'\n')
         callback_output(response.decode('utf-8'))
 
@@ -242,16 +223,10 @@ async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress, callback_outpu
    
 
 def read_serial_data(ser, command, delay=2):
-    """Function to handle blocking serial operations."""
     try:
-        # Give some time for the serial device to be ready
         time.sleep(delay)
-        
-        # Write the command to the serial port
         ser.write(command.encode('utf-8'))
-        time.sleep(2)  # Wait for the response
-        
-        # Read the data from the serial port
+        time.sleep(2)  
         response = ser.read_all().decode('utf-8')
         return response
     except Exception as e:
@@ -267,18 +242,15 @@ async def grab_ip(bmc_user, bmc_pass):
     command = "ifconfig eth0\n"
 
     try:
-        # Login and execute the command
         await asyncio.to_thread(ser.write, b'\n')
         await asyncio.to_thread(ser.write, user.encode('utf-8'))
         await asyncio.sleep(2)
         await asyncio.to_thread(ser.write, passw.encode('utf-8'))
         await asyncio.sleep(2)
         
-        # Execute command and read response
         response = await asyncio.to_thread(read_serial_data, ser, command)
         print(f"Response: {response}")
 
-        # Parse the response to find the IP address
         lines = response.split('\n')
         for line in lines:
             if 'inet ' in line and 'inet6' not in line:
@@ -301,7 +273,7 @@ async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_out
 
     start_server(directory, port, callback_output)
 
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)  # Reduced timeout for faster polling
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)  
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
     newline = '\n'
@@ -317,21 +289,19 @@ async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_out
         ser.write(command.encode('utf-8'))
         await asyncio.sleep(5)
 
-        # Start a task to detect the "Hit any key" prompt
         async def detect_prompt():
             start_time = time.time()
-            while time.time() - start_time < 3:  # 3 seconds window
+            while time.time() - start_time < 3:  
                 while ser.in_waiting > 0:
                     line = ser.readline().decode('utf-8', errors='replace').strip()
                     print(line)
                     if 'autoboot' in line:
-                        ser.write(b' ')  # Send a space character to simulate a key press
+                        ser.write(b' ')  
                         ser.flush()
                         return True
-                await asyncio.sleep(0.01)  # Short sleep to avoid busy-waiting
+                await asyncio.sleep(0.01)  
             return False
 
-        # Run the detection task concurrently
         prompt_detected = await detect_prompt()
 
         if not prompt_detected:
