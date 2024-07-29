@@ -296,7 +296,6 @@ async def grab_ip(bmc_user, bmc_pass):
 
 async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_output):
     directory = os.path.dirname(flash_file)
-    file_name = os.path.basename(flash_file)
     port = 80
     command = 'reboot\n'
 
@@ -305,6 +304,7 @@ async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_out
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
+    newline = '\n'
 
     try:
         ser.write(b'\n')
@@ -317,12 +317,15 @@ async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_out
         ser.write(command.encode('utf-8'))
         await asyncio.sleep(5)
 
-        # while True:
-        #     line = ser.readline().decode('utf-8', errors='replace')
-        #     print(line)
-        #     if 'Hit any key' in line:
-        #         ser.write(b'\n')
-        #         break
+        while True:
+            line = ser.readline().decode('utf-8', errors='replace').strip()
+            print(line)
+            if 'Hit any key to stop autoboot' in line:
+                ser.write(b'\n')
+                ser.flush()
+                break
+            await asyncio.sleep(0.1)
+            
         await asyncio.sleep(2)
         ser.write(f'setenv ipaddr {bmc_ip}\n'.encode('utf-8'))
         await asyncio.sleep(2)
@@ -341,10 +344,5 @@ async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_out
         ser.write(f'bmaptool copy obmc-phosphor-image-snuc-nanobmc.wic.xz /dev/mmcblk0\n'.encode('utf-8'))
         await asyncio.sleep(30)
         print('done')
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
     finally:
         ser.close()
-    

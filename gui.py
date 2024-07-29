@@ -57,8 +57,8 @@ async def flashub_button():
 
 
 
-def reset_button():
-    bmc.reset_ip(username.value, password.value, bmc_ip.value, update_progress, output_message)
+async def reset_button():
+    await bmc.reset_ip(username.value, password.value, bmc_ip.value, update_progress, output_message)
 
 
 
