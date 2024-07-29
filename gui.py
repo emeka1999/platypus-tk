@@ -3,7 +3,6 @@ import bmc as bmc
 
 
 
-
 fw_content = None
 flash_file = None
 
@@ -34,8 +33,10 @@ async def update_button():
         ui.notify("Please upload a firmware file first.", position='top')
 
 
+
 async def ip_button():
     await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
+
 
 
 async def choose_file():
@@ -76,7 +77,6 @@ def update_ui_info(info):
         firmware_version_label.set_text(f"Firmware Version: {info.get('FirmwareVersion', 'Unknown')}")
         name_model_text = f"Device: {info.get('Manufacturer', 'Unknown')} {info.get('Model', 'Unknown')}"
         manufacturer_model.set_text(name_model_text)
-
 
 
 
@@ -142,8 +142,6 @@ with ui.row().classes('w-full items-start'):
             firmware_version_label = ui.label('Firmware Version: ').classes('w-72')
             ip_label = ui.label('Current IP Address: ').classes('w-72')
         ui.button('Flash eMMC', on_click=emmc_button).classes('w-48 h-10 rounded-lg')
-
-        
 
 progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-4/5 h-2 rounded-lg absolute-bottom').style('margin: 0 auto; margin-bottom: 5px')
 progress_bar.visible = True
