@@ -125,7 +125,7 @@ with ui.row().classes('w-full items-start'):
         with ui.grid(columns=2).style('margin: 0 auto;'):
             ui.button('Update BMC', on_click=update_button).classes('w-48 h-10 rounded-lg')
             ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg')
-            ui.button('Reset BMC', on_click=reset_button).classes('w-48 h-10 rounded-lg')
+            ui.button('Network Reset', on_click=reset_button).classes('w-48 h-10 rounded-lg')
             ui.button('Flash U-Boot', on_click=flashub_button).classes('w-48 h-10 rounded-lg')
 
         # Log box
