@@ -105,16 +105,13 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
     callback_output("Running...")
 
     try:
-        ser.flushInput()
-        ser.write(b"\n")
-        initial_prompt = ser.read_all().decode('utf-8')
-        print(f'Prompt: {initial_prompt}')
-            
-        if '#' not in initial_prompt:
-            ser.write(user.encode('utf-8'))
-            await asyncio.sleep(2)
-            ser.write(passw.encode('utf-8'))
-            await asyncio.sleep(2)
+        ser.flushInput()                    
+        ser.write(b'\n')
+        await asyncio.sleep(2)  
+        ser.write(user.encode('utf-8'))
+        await asyncio.sleep(2)
+        ser.write(passw.encode('utf-8'))
+        await asyncio.sleep(5)
         
         callback_progress(0.5)
         callback_output("Logged in.")
@@ -169,13 +166,12 @@ async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress, call
     passw = f"{bmc_pass}\n"
 
     try:
-        initial_prompt = await asyncio.to_thread(ser.read_until, b'# ')
-
+        ser.write(b'\n')
+        await asyncio.sleep(2)  
         ser.write(user.encode('utf-8'))
         await asyncio.sleep(2)
         ser.write(passw.encode('utf-8'))
         await asyncio.sleep(5)
-        
         callback_progress(0.4)
 
         url = f"http://{my_ip}:{port}/{file_name}"
@@ -250,11 +246,12 @@ async def grab_ip(bmc_user, bmc_pass):
     command = "ifconfig eth0\n"
 
     try:
-        await asyncio.to_thread(ser.write, b'\n')
-        await asyncio.to_thread(ser.write, user.encode('utf-8'))
+        ser.write(b'\n')
+        await asyncio.sleep(2)  
+        ser.write(user.encode('utf-8'))
         await asyncio.sleep(2)
-        await asyncio.to_thread(ser.write, passw.encode('utf-8'))
-        await asyncio.sleep(2)
+        ser.write(passw.encode('utf-8'))
+        await asyncio.sleep(5)
         
         response = await asyncio.to_thread(read_serial_data, ser, command)
         print(f"Response: {response}")
@@ -275,7 +272,7 @@ async def grab_ip(bmc_user, bmc_pass):
 
 
 # Factory resets the BMC through serial - only works with nano bmc 
-#TODO mos bmc compatibility 
+#TODO mos bmc compatibility and stabilization  
 async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_output):
     directory = os.path.dirname(flash_file)
     port = 80
