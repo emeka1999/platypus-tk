@@ -18,9 +18,10 @@ def output_message(message):
 def update_progress(value):
     if value is not None and 0 <= value <= 1:
             progress_bar.set_value(value)
-            output_message(f"progress: {value*100}%")
+            #output_message(f"progress: {value*100}%")
     else:
         output_message(f"Invalid progress value: {value}")
+
 
 
 buttons = []
@@ -40,6 +41,7 @@ def disable():
 # Checks for firmware file before flashing the firmware file 
 async def update_button():
     with disable():
+        output_message('Please pick a firmware file to flash.')
         fw_path = await choose_file()
         if fw_path:
             with open(fw_path, 'rb') as fw_file:
@@ -171,7 +173,12 @@ with ui.row().classes('w-full items-start'):
             health_label = ui.label('Health: ').classes('w-72')
             firmware_version_label = ui.label('Firmware Version: ').classes('w-72')
             ip_label = ui.label('Current IP Address: ').classes('w-72')
-        buttons.append(ui.button('Flash eMMC', on_click=emmc_button).classes('w-48 h-10 rounded-lg'))
+        with ui.row():
+            buttons.append(ui.button('Flash eMMC', on_click=emmc_button).classes('w-48 h-10 rounded-lg'))
+            with ui.dropdown_button(icon='settings', auto_close=True):
+                with ui.row():
+                    ui.radio(['MOS BMC', 'Nano BMC'], value = 1)
+            
 
 progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-4/5 h-2 rounded-lg absolute-bottom').style('margin: 0 auto; margin-bottom: 5px')
 progress_bar.visible = True
@@ -179,8 +186,5 @@ progress_bar.visible = True
 app.native.window_args['resizable'] = False
 
 ui.run(native=True, dark=True, title='Platypus', window_size=(850, 750), reload=False, port=8000)
-
-
-# Disable other buttons while a function is running 
 
 # Figure out why hitting certains buttons after other buttons causes errors 
