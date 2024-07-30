@@ -1,6 +1,6 @@
 from nicegui import app, ui
 import bmc as bmc
-
+from contextlib import contextmanager
 
 
 fw_content = None
@@ -23,22 +23,37 @@ def update_progress(value):
         output_message(f"Invalid progress value: {value}")
 
 
+buttons = []
+
+@contextmanager
+def disable():
+    for button in buttons:
+        button.disable()
+    try:
+        yield
+    finally:
+        for button in buttons:
+            button.enable()
+
+
 
 # Checks for firmware file before flashing the firmware file 
 async def update_button():
-    fw_path = await choose_file()
-    if fw_path:
-        with open(fw_path, 'rb') as fw_file:
-            fw_content = fw_file.read()
-        await bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, update_progress, output_message)
-    else:
-        ui.notify("Please upload a firmware file first.", position='top')
+    with disable():
+        fw_path = await choose_file()
+        if fw_path:
+            with open(fw_path, 'rb') as fw_file:
+                fw_content = fw_file.read()
+            await bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, update_progress, output_message)
+        else:
+            ui.notify("Please upload a firmware file first.", position='top')
 
 
 
 # Initiates setting temporary ip address
 async def ip_button():
-    await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
+    with disable():
+        await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
 
 
 
@@ -57,17 +72,20 @@ async def choose_file():
 
 # Pick a file before initiating flashing the U-Boot 
 async def flashub_button():
-    flash_file = await choose_file()
-    if flash_file:
-        await bmc.flasher(username.value, password.value, flash_file, your_ip.value, update_progress, output_message)
+    with disable():
+        flash_file = await choose_file()
+        if flash_file:
+            await bmc.flasher(username.value, password.value, flash_file, your_ip.value, update_progress, output_message)
 
 
 # Calls the network wipe 
 async def reset_button():
-    await bmc.reset_ip(username.value, password.value, bmc_ip.value, update_progress, output_message)
+    with disable():
+        await bmc.reset_ip(username.value, password.value, bmc_ip.value, update_progress, output_message)
 
 
 
+# Not sure if I use this currently...
 def on_upload(event):
     global fw_content
     fw_content = event.content.read()
@@ -77,12 +95,13 @@ def on_upload(event):
 
 # orgainzes various information regarding the bmc
 def update_ui_info(info):
-    if info:
-        health_label.set_text(f"Health: {info.get('Status', {}).get('Health', 'Unknown')}")
-        power_label.set_text(f"Power: {info.get('PowerState', 'Unknown')}")
-        firmware_version_label.set_text(f"Firmware Version: {info.get('FirmwareVersion', 'Unknown')}")
-        name_model_text = f"Device: {info.get('Manufacturer', 'Unknown')} {info.get('Model', 'Unknown')}"
-        manufacturer_model.set_text(name_model_text)
+    with disable():
+        if info:
+            health_label.set_text(f"Health: {info.get('Status', {}).get('Health', 'Unknown')}")
+            power_label.set_text(f"Power: {info.get('PowerState', 'Unknown')}")
+            firmware_version_label.set_text(f"Firmware Version: {info.get('FirmwareVersion', 'Unknown')}")
+            name_model_text = f"Device: {info.get('Manufacturer', 'Unknown')} {info.get('Model', 'Unknown')}"
+            manufacturer_model.set_text(name_model_text)
 
 
 
@@ -100,18 +119,20 @@ async def load_ip():
 
 # Grabs various information regarding the bmc
 async def load_info():
-    if bmc_ip.value:
-        info = bmc.bmc_info(username.value, password.value, bmc_ip.value)
-        update_ui_info(info)
-    await load_ip()
+    with disable():
+        if bmc_ip.value:
+            info = bmc.bmc_info(username.value, password.value, bmc_ip.value)
+            update_ui_info(info)
+        await load_ip()
 
 
 
 # Pick a file before initiating factory reset 
 async def emmc_button():
-    flash_file = await choose_file()
-    if flash_file:
-        await bmc.flash_emmc(username.value, password.value, bmc_ip.value, flash_file,  your_ip.value, output_message)
+    with disable():
+        flash_file = await choose_file()
+        if flash_file:
+            await bmc.flash_emmc(username.value, password.value, bmc_ip.value, flash_file,  your_ip.value, output_message)
 
 
 
@@ -132,10 +153,10 @@ with ui.row().classes('w-full items-start'):
 
         # Row for grid of buttons
         with ui.grid(columns=2).style('margin: 0 auto;'):
-            ui.button('Update BMC', on_click=update_button).classes('w-48 h-10 rounded-lg')
-            ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg')
-            ui.button('Network Reset', on_click=reset_button).classes('w-48 h-10 rounded-lg')
-            ui.button('Flash U-Boot', on_click=flashub_button).classes('w-48 h-10 rounded-lg')
+            buttons.append(ui.button('Update BMC', on_click=update_button).classes('w-48 h-10 rounded-lg'))
+            buttons.append(ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg'))
+            buttons.append(ui.button('Network Reset', on_click=reset_button).classes('w-48 h-10 rounded-lg'))
+            buttons.append(ui.button('Flash U-Boot', on_click=flashub_button).classes('w-48 h-10 rounded-lg'))
 
         # Log box
         status = ui.log().classes('h-75 w-86').style('margin: 0 auto; margin-top: 15px;')
@@ -143,14 +164,14 @@ with ui.row().classes('w-full items-start'):
     # 2nd column
     with ui.card(align_items='start').classes('no-shadow border-[0px] w-96 h-75').style('background-color:#121212; margin-left: 15px; margin-top: 15px;'):
         ui.label('BMC Information:').classes('text-left').style('font-size: 20px;')
-        ui.button("Load info", on_click=load_info)
+        buttons.append(ui.button("Load info", on_click=load_info))
         with ui.column():
             manufacturer_model = ui.label('Device: ').classes('w-72')
             power_label = ui.label('Power State: ').classes('w-72')
             health_label = ui.label('Health: ').classes('w-72')
             firmware_version_label = ui.label('Firmware Version: ').classes('w-72')
             ip_label = ui.label('Current IP Address: ').classes('w-72')
-        ui.button('Flash eMMC', on_click=emmc_button).classes('w-48 h-10 rounded-lg')
+        buttons.append(ui.button('Flash eMMC', on_click=emmc_button).classes('w-48 h-10 rounded-lg'))
 
 progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-4/5 h-2 rounded-lg absolute-bottom').style('margin: 0 auto; margin-bottom: 5px')
 progress_bar.visible = True
@@ -158,3 +179,8 @@ progress_bar.visible = True
 app.native.window_args['resizable'] = False
 
 ui.run(native=True, dark=True, title='Platypus', window_size=(850, 750), reload=False, port=8000)
+
+
+# Disable other buttons while a function is running 
+
+# Figure out why hitting certains buttons after other buttons causes errors 
