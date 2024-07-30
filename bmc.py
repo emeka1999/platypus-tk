@@ -273,10 +273,15 @@ async def grab_ip(bmc_user, bmc_pass):
 
 # Factory resets the BMC through serial - only works with nano bmc 
 #TODO mos bmc compatibility and stabilization  
-async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_output):
+async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, dd_value, callback_output):
     directory = os.path.dirname(flash_file)
     port = 80
     command = 'reboot\n'
+
+    if dd_value == 1:
+        type = 'mos-bmc'
+    else:
+        type = 'nanobmc'
 
     start_server(directory, port, callback_output)
 
@@ -318,19 +323,19 @@ async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, callback_out
         await asyncio.sleep(2)
         ser.write(f'setenv ipaddr {bmc_ip}\n'.encode('utf-8'))
         await asyncio.sleep(2)
-        ser.write(f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-nanobmc.itb; bootm\n'.encode('utf-8'))
+        ser.write(f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-{type}.itb; bootm\n'.encode('utf-8'))
         await asyncio.sleep(35)
         command = f'ifconfig eth0 up {bmc_ip}\n'
         ser.write(command.encode('utf-8'))
         await asyncio.sleep(2)
-        curl_command = f"curl -o obmc-phosphor-image-snuc-nanobmc.wic.xz {my_ip}/obmc-phosphor-image-snuc-nanobmc.wic.xz\n"
+        curl_command = f"curl -o obmc-phosphor-image-snuc-{type}.wic.xz {my_ip}/obmc-phosphor-image-snuc-{type}.wic.xz\n"
         ser.write(curl_command.encode('utf-8'))
         await asyncio.sleep(5)
-        curl_command = f'curl -o obmc-phosphor-image-snuc-nanobmc.wic.bmap {my_ip}/obmc-phosphor-image-snuc-nanobmc.wic.bmap\n'
+        curl_command = f'curl -o obmc-phosphor-image-snuc-{type}.wic.bmap {my_ip}/obmc-phosphor-image-snuc-{type}.wic.bmap\n'
         await asyncio.sleep(5)
         ser.write(curl_command.encode('utf-8'))
         await asyncio.sleep(5)
-        ser.write(f'bmaptool copy obmc-phosphor-image-snuc-nanobmc.wic.xz /dev/mmcblk0\n'.encode('utf-8'))
+        ser.write(f'bmaptool copy obmc-phosphor-image-snuc-{type}.wic.xz /dev/mmcblk0\n'.encode('utf-8'))
         await asyncio.sleep(30)
         print('done')
     finally:

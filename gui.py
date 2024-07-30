@@ -132,9 +132,10 @@ async def load_info():
 # Pick a file before initiating factory reset 
 async def emmc_button():
     with disable():
+        dd_value = radio.value
         flash_file = await choose_file()
         if flash_file:
-            await bmc.flash_emmc(username.value, password.value, bmc_ip.value, flash_file,  your_ip.value, output_message)
+            await bmc.flash_emmc(username.value, password.value, bmc_ip.value, flash_file,  your_ip.value, dd_value, output_message)
 
 
 
@@ -177,7 +178,7 @@ with ui.row().classes('w-full items-start'):
             buttons.append(ui.button('Flash eMMC', on_click=emmc_button).classes('w-48 h-10 rounded-lg'))
             with ui.dropdown_button(icon='settings', auto_close=True):
                 with ui.row():
-                    ui.radio(['MOS BMC', 'Nano BMC'], value = 1)
+                    radio = ui.radio({1:'MOS BMC', 2:'Nano BMC'})
             
 
 progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-4/5 h-2 rounded-lg absolute-bottom').style('margin: 0 auto; margin-bottom: 5px')
