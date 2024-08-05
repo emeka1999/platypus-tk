@@ -6,6 +6,7 @@ __pycache__/
 *.bin
 /build/
 /dist/
-
+Dockerfile
+docker-compose.yml
 
 
