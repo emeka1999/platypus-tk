@@ -8,5 +8,6 @@ __pycache__/
 /dist/
 Dockerfile
 docker-compose.yml
+/venv/
 
 
