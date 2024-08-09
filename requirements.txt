@@ -9,6 +9,8 @@ qtpy
 PyQt5
 PySide2
 PyGObject
+tk
+
 
 
 # Ran the following to get it working on Ubunutu 22.04
@@ -16,6 +18,7 @@ PyGObject
 # sudo apt-get install libcairo2-dev
 # sudo apt-get install libgirepository1.0-dev
 # sudo apt-get install cmake
+
 
 
 
