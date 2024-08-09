@@ -273,8 +273,7 @@ async def grab_ip(bmc_user, bmc_pass):
 
 # Factory resets the BMC through serial - only works with nano bmc 
 #TODO mos bmc compatibility and stabilization  
-async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, dd_value, callback_output):
-    directory = os.path.dirname(flash_file)
+async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_output):
     port = 80
     command = 'reboot\n'
 
@@ -286,58 +285,26 @@ async def flash_emmc(bmc_user, bmc_pass, bmc_ip, flash_file, my_ip, dd_value, ca
     start_server(directory, port, callback_output)
 
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)  
-    user = f"{bmc_user}\n"
-    passw = f"{bmc_pass}\n"
-    newline = '\n'
 
-    try:
-        ser.write(b'\n')
-        await asyncio.sleep(2)  
-        ser.write(user.encode('utf-8'))
-        await asyncio.sleep(2)
-        ser.write(passw.encode('utf-8'))
-        await asyncio.sleep(5)
-        
-        ser.write(command.encode('utf-8'))
-        await asyncio.sleep(5)
+    await asyncio.sleep(2)
+    ser.write(f'setenv ipaddr {bmc_ip}\n'.encode('utf-8'))
+    await asyncio.sleep(2)
+    ser.write(f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-{type}.itb; bootm\n'.encode('utf-8'))
+    await asyncio.sleep(35)
+    command = f'ifconfig eth0 up {bmc_ip}\n'
+    ser.write(command.encode('utf-8'))
+    await asyncio.sleep(2)
+    curl_command = f"curl -o obmc-phosphor-image-snuc-{type}.wic.xz {my_ip}/obmc-phosphor-image-snuc-{type}.wic.xz\n"
+    ser.write(curl_command.encode('utf-8'))
+    await asyncio.sleep(5)
+    curl_command = f'curl -o obmc-phosphor-image-snuc-{type}.wic.bmap {my_ip}/obmc-phosphor-image-snuc-{type}.wic.bmap\n'
+    await asyncio.sleep(5)
+    ser.write(curl_command.encode('utf-8'))
+    await asyncio.sleep(5)
+    ser.write(f'bmaptool copy obmc-phosphor-image-snuc-{type}.wic.xz /dev/mmcblk0\n'.encode('utf-8'))
+    await asyncio.sleep(30)
+    print('done')
 
-        async def detect_prompt():
-            start_time = time.time()
-            while time.time() - start_time < 3:  
-                while ser.in_waiting > 0:
-                    line = ser.readline().decode('utf-8', errors='replace').strip()
-                    print(line)
-                    if 'autoboot' in line:
-                        ser.write(b' ')  
-                        ser.flush()
-                        return True
-                await asyncio.sleep(0.01)  
-            return False
+    ser.close()
 
-        prompt_detected = await detect_prompt()
-
-        if not prompt_detected:
-            print("Failed to detect 'Hit any key to stop autoboot' prompt in time.")
-            return
-
-        await asyncio.sleep(2)
-        ser.write(f'setenv ipaddr {bmc_ip}\n'.encode('utf-8'))
-        await asyncio.sleep(2)
-        ser.write(f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-{type}.itb; bootm\n'.encode('utf-8'))
-        await asyncio.sleep(35)
-        command = f'ifconfig eth0 up {bmc_ip}\n'
-        ser.write(command.encode('utf-8'))
-        await asyncio.sleep(2)
-        curl_command = f"curl -o obmc-phosphor-image-snuc-{type}.wic.xz {my_ip}/obmc-phosphor-image-snuc-{type}.wic.xz\n"
-        ser.write(curl_command.encode('utf-8'))
-        await asyncio.sleep(5)
-        curl_command = f'curl -o obmc-phosphor-image-snuc-{type}.wic.bmap {my_ip}/obmc-phosphor-image-snuc-{type}.wic.bmap\n'
-        await asyncio.sleep(5)
-        ser.write(curl_command.encode('utf-8'))
-        await asyncio.sleep(5)
-        ser.write(f'bmaptool copy obmc-phosphor-image-snuc-{type}.wic.xz /dev/mmcblk0\n'.encode('utf-8'))
-        await asyncio.sleep(30)
-        print('done')
-    finally:
-        ser.close()
 

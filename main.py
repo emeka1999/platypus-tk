@@ -1,6 +1,10 @@
 from nicegui import app, ui
 import bmc as bmc
 from contextlib import contextmanager
+import tkinter as tk
+from tkinter import filedialog
+
+
 
 
 fw_content = None
@@ -72,6 +76,18 @@ async def choose_file():
 
 
 
+def choose_directory():
+    root = tk.Tk()
+    root.withdraw()
+    directory = filedialog.askdirectory()
+    if directory:
+        ui.notify(f"Selected directory: {directory}")
+        return directory
+    else:
+        ui.notify("No directory selected.")
+        return None
+    
+
 # Pick a file before initiating flashing the U-Boot 
 async def flashub_button():
     with disable():
@@ -133,9 +149,11 @@ async def load_info():
 async def emmc_button():
     with disable():
         dd_value = radio.value
-        flash_file = await choose_file()
-        if flash_file:
-            await bmc.flash_emmc(username.value, password.value, bmc_ip.value, flash_file,  your_ip.value, dd_value, output_message)
+        directory = choose_directory()
+        if directory:
+            await bmc.flash_emmc(bmc_ip.value, directory, your_ip.value, dd_value, output_message)
+        else: 
+            ui.notify("Please choose a directory")
 
 
 
@@ -152,7 +170,7 @@ with ui.row().classes('w-full items-start'):
                 username = ui.input(placeholder='Username').classes('w-72').props('rounded outlined dense')
                 password = ui.input(placeholder='Password').classes('w-72').props('rounded outlined dense type=password')
                 bmc_ip = ui.input(placeholder='BMC IP').classes('w-72').props('rounded outlined dense')
-                your_ip = ui.input(placeholder='U-Boot Server IP').classes('w-72').props('rounded outlined dense')
+                your_ip = ui.input(placeholder='HOST IP').classes('w-72').props('rounded outlined dense')
 
         # Row for grid of buttons
         with ui.grid(columns=2).style('margin: 0 auto;'):
