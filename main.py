@@ -204,6 +204,6 @@ progress_bar.visible = True
 
 app.native.window_args['resizable'] = False
 
-ui.run(native=True, dark=True, title='Platypus', window_size=(850, 800), reload=False, port=8081, host='0.0.0.0')
+ui.run(native=True, dark=True, title='Platypus', window_size=(900, 800), reload=False, port=8081, host='0.0.0.0')
 
 # Figure out why hitting certains buttons after other buttons causes errors 
