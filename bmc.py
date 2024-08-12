@@ -273,7 +273,7 @@ async def grab_ip(bmc_user, bmc_pass):
 
 # Factory resets the BMC through serial - only works with nano bmc 
 #TODO mos bmc compatibility and stabilization  
-async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_output):
+async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, callback_output):
     port = 80
     command = 'reboot\n'
 
@@ -283,28 +283,46 @@ async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_output):
         type = 'nanobmc'
 
     start_server(directory, port, callback_output)
-
+    callback_progress(13)
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)  
 
     await asyncio.sleep(2)
     ser.write(f'setenv ipaddr {bmc_ip}\n'.encode('utf-8'))
+    callback_output("Setting IP Address (bootloader)...")
+    callback_progress(26)
+
     await asyncio.sleep(2)
     ser.write(f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-{type}.itb; bootm\n'.encode('utf-8'))
-    await asyncio.sleep(35)
+    callback_output("Grabbing virtual restore image...")
+    callback_progress(39)
+
+    await asyncio.sleep(25)
     command = f'ifconfig eth0 up {bmc_ip}\n'
     ser.write(command.encode('utf-8'))
+    callback_output("Setting IP Address (BMC)...")
+    callback_progress(52)
+
     await asyncio.sleep(2)
     curl_command = f"curl -o obmc-phosphor-image-snuc-{type}.wic.xz {my_ip}/obmc-phosphor-image-snuc-{type}.wic.xz\n"
     ser.write(curl_command.encode('utf-8'))
+    callback_output("Grabbing restore image to your system...")
+    callback_progress(64)
+
     await asyncio.sleep(5)
     curl_command = f'curl -o obmc-phosphor-image-snuc-{type}.wic.bmap {my_ip}/obmc-phosphor-image-snuc-{type}.wic.bmap\n'
-    await asyncio.sleep(5)
+    callback_output("Grabbing the mapping file...")
+    await asyncio.sleep(90)
     ser.write(curl_command.encode('utf-8'))
+    callback_progress(86)
+    
     await asyncio.sleep(5)
     ser.write(f'bmaptool copy obmc-phosphor-image-snuc-{type}.wic.xz /dev/mmcblk0\n'.encode('utf-8'))
-    await asyncio.sleep(30)
-    print('done')
-
+    callback_output("Flashing the restore image to your system...")
+    await asyncio.sleep(15)
+    callback_output("Factory Reset Complete. Please let the BMC reboot.")
+    callback_progress(100)
+    
+    ser.write('reboot\n')
     ser.close()
 
 

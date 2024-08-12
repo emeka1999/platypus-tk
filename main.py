@@ -151,7 +151,7 @@ async def emmc_button():
         dd_value = radio.value
         directory = choose_directory()
         if directory:
-            await bmc.flash_emmc(bmc_ip.value, directory, your_ip.value, dd_value, output_message)
+            await bmc.flash_emmc(bmc_ip.value, directory, your_ip.value, dd_value, update_progress, output_message)
         else: 
             ui.notify("Please choose a directory")
 
