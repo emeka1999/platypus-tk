@@ -271,8 +271,7 @@ async def grab_ip(bmc_user, bmc_pass):
 
 
 
-# Factory resets the BMC through serial - only works with nano bmc 
-#TODO mos bmc compatibility and stabilization  
+# Factory resets the BMC through serial
 async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, callback_output):
     port = 80
     command = 'reboot\n'

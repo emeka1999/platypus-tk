@@ -44,6 +44,19 @@ def disable():
 
 # Checks for firmware file before flashing the firmware file 
 async def update_button():
+    if not username.value or not password.value or not bmc_ip.value:
+        missing_fields = []
+        if not username.value:
+            missing_fields.append("Username")
+        if not password.value:
+            missing_fields.append("Password")
+        if not bmc_ip.value:
+            missing_fields.append("IP Address")
+        
+        # Prompt the user to fill in the missing fields
+        ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+        return
+
     with disable():
         output_message('Please pick a firmware file to flash.')
         fw_path = await choose_file()
@@ -58,6 +71,19 @@ async def update_button():
 
 # Initiates setting temporary ip address
 async def ip_button():
+    if not username.value or not password.value or not bmc_ip.value:
+        missing_fields = []
+        if not username.value:
+            missing_fields.append("Username")
+        if not password.value:
+            missing_fields.append("Password")
+        if not bmc_ip.value:
+            missing_fields.append("IP Address")
+        
+        # Prompt the user to fill in the missing fields
+        ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+        return
+    
     with disable():
         await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
 
@@ -90,6 +116,16 @@ def choose_directory():
 
 # Pick a file before initiating flashing the U-Boot 
 async def flashub_button():
+    if not username.value or not password.value:
+        missing_fields = []
+        if not username.value:
+            missing_fields.append("Username")
+        if not password.value:
+            missing_fields.append("Password")
+        
+        # Prompt the user to fill in the missing fields
+        ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+        return
     with disable():
         flash_file = await choose_file()
         if flash_file:
@@ -98,6 +134,18 @@ async def flashub_button():
 
 # Calls the network wipe 
 async def reset_button():
+    if not username.value or not password.value or not bmc_ip.value:
+        missing_fields = []
+        if not username.value:
+            missing_fields.append("Username")
+        if not password.value:
+            missing_fields.append("Password")
+        if not bmc_ip.value:
+            missing_fields.append("IP Address")
+        
+        # Prompt the user to fill in the missing fields
+        ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+        return
     with disable():
         await bmc.reset_ip(username.value, password.value, bmc_ip.value, update_progress, output_message)
 
@@ -137,6 +185,20 @@ async def load_ip():
 
 # Grabs various information regarding the bmc
 async def load_info():
+    if not username.value or not password.value:
+        missing_fields = []
+        if not username.value:
+            missing_fields.append("Username")
+        if not password.value:
+            missing_fields.append("Password")
+        
+        # Prompt the user to fill in the missing fields
+        ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+        return
+
+    if not bmc_ip.value:
+        ui.notify("Enter BMC IP Address for more information.")
+    
     with disable():
         if bmc_ip.value:
             info = bmc.bmc_info(username.value, password.value, bmc_ip.value)
@@ -147,6 +209,20 @@ async def load_info():
 
 # Pick a file before initiating factory reset 
 async def emmc_button():
+    if not username.value or not password.value or not bmc_ip.value or not radio.value:
+        missing_fields = []
+        if not username.value:
+            missing_fields.append("Username")
+        if not password.value:
+            missing_fields.append("Password")
+        if not bmc_ip.value:
+            missing_fields.append("IP Address")
+        if not radio.value:
+            missing_fields.append("BMC Type")
+        
+        # Prompt the user to fill in the missing fields
+        ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+        return
     with disable():
         dd_value = radio.value
         directory = choose_directory()
