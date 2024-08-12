@@ -282,37 +282,37 @@ async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, call
         type = 'nanobmc'
 
     start_server(directory, port, callback_output)
-    callback_progress(13)
+    callback_progress(10)
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)  
 
     await asyncio.sleep(2)
     ser.write(f'setenv ipaddr {bmc_ip}\n'.encode('utf-8'))
     callback_output("Setting IP Address (bootloader)...")
-    callback_progress(26)
+    callback_progress(20)
 
     await asyncio.sleep(2)
     ser.write(f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-{type}.itb; bootm\n'.encode('utf-8'))
     callback_output("Grabbing virtual restore image...")
-    callback_progress(39)
+    callback_progress(40)
 
     await asyncio.sleep(25)
     command = f'ifconfig eth0 up {bmc_ip}\n'
     ser.write(command.encode('utf-8'))
     callback_output("Setting IP Address (BMC)...")
-    callback_progress(52)
+    callback_progress(50)
 
     await asyncio.sleep(2)
     curl_command = f"curl -o obmc-phosphor-image-snuc-{type}.wic.xz {my_ip}/obmc-phosphor-image-snuc-{type}.wic.xz\n"
     ser.write(curl_command.encode('utf-8'))
     callback_output("Grabbing restore image to your system...")
-    callback_progress(64)
+    callback_progress(60)
 
     await asyncio.sleep(5)
     curl_command = f'curl -o obmc-phosphor-image-snuc-{type}.wic.bmap {my_ip}/obmc-phosphor-image-snuc-{type}.wic.bmap\n'
     callback_output("Grabbing the mapping file...")
-    await asyncio.sleep(90)
+    await asyncio.sleep(5)
     ser.write(curl_command.encode('utf-8'))
-    callback_progress(86)
+    callback_progress(90)
     
     await asyncio.sleep(5)
     ser.write(f'bmaptool copy obmc-phosphor-image-snuc-{type}.wic.xz /dev/mmcblk0\n'.encode('utf-8'))
@@ -321,7 +321,7 @@ async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, call
     callback_output("Factory Reset Complete. Please let the BMC reboot.")
     callback_progress(100)
     
-    ser.write('reboot\n')
+    ser.write(b'reboot\n')
     ser.close()
 
 
