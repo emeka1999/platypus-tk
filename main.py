@@ -179,7 +179,7 @@ def update_ip(current_ip):
 
 # Grabs the current ip address of the bmc 
 async def load_ip():
-    current_ip = await bmc.grab_ip(username.value, password.value)
+    current_ip = await bmc.grab_ip(username.value, password.value, output_message)
     update_ip(current_ip)
 
 
@@ -199,9 +199,10 @@ async def load_info():
     if not bmc_ip.value:
         ui.notify("Enter BMC IP Address for more information.")
     
+    
     with disable():
         if bmc_ip.value:
-            info = bmc.bmc_info(username.value, password.value, bmc_ip.value)
+            info = bmc.bmc_info(username.value, password.value, bmc_ip.value, output_message)
             update_ui_info(info)
         await load_ip()
 
@@ -209,7 +210,7 @@ async def load_info():
 
 # Pick a file before initiating factory reset 
 async def emmc_button():
-    if not username.value or not password.value or not bmc_ip.value or not radio.value:
+    if not username.value or not password.value or not bmc_ip.value or not radio.value or not your_ip.value:
         missing_fields = []
         if not username.value:
             missing_fields.append("Username")
@@ -219,6 +220,8 @@ async def emmc_button():
             missing_fields.append("IP Address")
         if not radio.value:
             missing_fields.append("BMC Type")
+        if not your_ip.value:
+            missing_fields.append("Host IP")
         
         # Prompt the user to fill in the missing fields
         ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
@@ -244,7 +247,7 @@ with ui.row().classes('w-full items-start'):
                 ui.label('Interactions:').classes('text-left').style('font-size: 20px; text-align: left; padding-right: 90px;')
             with ui.row().classes('justify-center'):
                 username = ui.input(placeholder='Username').classes('w-72').props('rounded outlined dense')
-                password = ui.input(placeholder='Password').classes('w-72').props('rounded outlined dense type=password')
+                password = ui.input(placeholder='Password').classes('w-72').props('rounded outlined dense')  # type=password
                 bmc_ip = ui.input(placeholder='BMC IP').classes('w-72').props('rounded outlined dense')
                 your_ip = ui.input(placeholder='HOST IP').classes('w-72').props('rounded outlined dense')
 
@@ -254,9 +257,6 @@ with ui.row().classes('w-full items-start'):
             buttons.append(ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg'))
             buttons.append(ui.button('Network Reset', on_click=reset_button).classes('w-48 h-10 rounded-lg'))
             buttons.append(ui.button('Flash U-Boot', on_click=flashub_button).classes('w-48 h-10 rounded-lg'))
-
-        # Log box
-        status = ui.log().classes('h-75 w-86').style('margin: 0 auto; margin-top: 15px;')
 
     # 2nd column
     with ui.card(align_items='start').classes('no-shadow border-[0px] w-96 h-75').style('background-color:#121212; margin-left: 15px; margin-top: 15px;'):
@@ -273,13 +273,17 @@ with ui.row().classes('w-full items-start'):
             with ui.dropdown_button(icon='settings', auto_close=True):
                 with ui.row():
                     radio = ui.radio({1:'MOS BMC', 2:'Nano BMC'})
+
+
+# Log box
+status = ui.log().classes('h-75 w-86').style('margin: 0 auto; margin-top: 15px;')
             
 
-progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-4/5 h-2 rounded-lg absolute-bottom').style('margin: 0 auto; margin-bottom: 5px')
+progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-4/5 h-2 rounded-lg absolute-bottom').style('margin: 0 auto; margin-bottom: 10px')
 progress_bar.visible = True
 
 app.native.window_args['resizable'] = False
 
-ui.run(native=True, dark=True, title='Platypus', window_size=(900, 850), reload=False, port=8081, host='0.0.0.0')
+ui.run(native=True, dark=True, title='Platypus', window_size=(850, 800), reload=False, port=8081, host='0.0.0.0')
 
 # Figure out why hitting certains buttons after other buttons causes errors 

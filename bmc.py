@@ -75,7 +75,7 @@ async def monitor_task(redfish_client, task_url, callback_output, callback_progr
 
 
 # Grabs various information regarding the bmc through redfish 
-def bmc_info(bmc_user, bmc_pass, bmc_ip):
+def bmc_info(bmc_user, bmc_pass, bmc_ip, callback_out):
     try:
         redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
         redfish_client.login(auth="session")
@@ -84,10 +84,10 @@ def bmc_info(bmc_user, bmc_pass, bmc_ip):
             bmc_info = response.dict
             return(bmc_info)
         else:
-            print(f"Failed to fetch BMC information. Status code: {response.status}")
+            callback_out(f"Failed to fetch BMC information. Status code: {response.status}")
             return None
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        callback_out(f"An error occurred: {str(e)}")
         return None
     finally:
         redfish_client.logout()
@@ -123,14 +123,28 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
 
         callback_progress(0.75)
         callback_output("Setting IP...")
+
+        ser.close()
+        callback_progress(1)
+        callback_output("IP set successfully.")
+        await asyncio.sleep(5)
+        callback_progress(0)
+
     except Exception as e:
-        callback_output(f"Error: {e}")
+        if "device reports readiness to read but returned no data" in str(e):
+            callback_progress(1)
+            callback_output("IP set successfully.")
+            await asyncio.sleep(5)
+            callback_progress(0)
+            ser.close()
+            callback_output(f"Error: {e}")
+        else:
+            callback_output(f"Error: {e}")
+            callback_output("Exiting process. Set IP unsuccessful.")
+            callback_progress(0)
     
-    ser.close()
-    callback_progress(1)
-    callback_output("IP set successfully.")
-    await asyncio.sleep(5)
-    callback_progress(0)
+    
+    
 
 
 
@@ -225,7 +239,7 @@ async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress, callback_outpu
    
 
 # Reads serial response for a particular command
-def read_serial_data(ser, command, delay=2):
+def read_serial_data(ser, command, delay):
     try:
         time.sleep(delay)
         ser.write(command.encode('utf-8'))
@@ -239,7 +253,7 @@ def read_serial_data(ser, command, delay=2):
 
 
 # Grabs the current ip address of the bmc
-async def grab_ip(bmc_user, bmc_pass):
+async def grab_ip(bmc_user, bmc_pass, callback_output):
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
@@ -253,18 +267,18 @@ async def grab_ip(bmc_user, bmc_pass):
         ser.write(passw.encode('utf-8'))
         await asyncio.sleep(5)
         
-        response = await asyncio.to_thread(read_serial_data, ser, command)
-        print(f"Response: {response}")
+        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
+        callback_output(f"Response: {response}")
 
         lines = response.split('\n')
         for line in lines:
             if 'inet ' in line and 'inet6' not in line:
                 part = line.split(':')[1]
                 ip_address = part.split()[0]
-                print(ip_address)
+                callback_output(ip_address)
         return ip_address
     except Exception as e:
-        print(f"Error: {e}")
+        callback_output(f"Error: {e}")
         return None
     finally:
         ser.close()
@@ -282,44 +296,44 @@ async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, call
         type = 'nanobmc'
 
     start_server(directory, port, callback_output)
-    callback_progress(10)
+    callback_progress(.10)
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)  
 
     await asyncio.sleep(2)
     ser.write(f'setenv ipaddr {bmc_ip}\n'.encode('utf-8'))
     callback_output("Setting IP Address (bootloader)...")
-    callback_progress(20)
+    callback_progress(.20)
 
     await asyncio.sleep(2)
     ser.write(f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-{type}.itb; bootm\n'.encode('utf-8'))
     callback_output("Grabbing virtual restore image...")
-    callback_progress(40)
+    callback_progress(.40)
 
     await asyncio.sleep(25)
     command = f'ifconfig eth0 up {bmc_ip}\n'
     ser.write(command.encode('utf-8'))
     callback_output("Setting IP Address (BMC)...")
-    callback_progress(50)
+    callback_progress(.50)
 
     await asyncio.sleep(2)
     curl_command = f"curl -o obmc-phosphor-image-snuc-{type}.wic.xz {my_ip}/obmc-phosphor-image-snuc-{type}.wic.xz\n"
     ser.write(curl_command.encode('utf-8'))
     callback_output("Grabbing restore image to your system...")
-    callback_progress(60)
+    callback_progress(.60)
 
     await asyncio.sleep(5)
     curl_command = f'curl -o obmc-phosphor-image-snuc-{type}.wic.bmap {my_ip}/obmc-phosphor-image-snuc-{type}.wic.bmap\n'
     callback_output("Grabbing the mapping file...")
     await asyncio.sleep(5)
     ser.write(curl_command.encode('utf-8'))
-    callback_progress(90)
+    callback_progress(.90)
     
     await asyncio.sleep(5)
     ser.write(f'bmaptool copy obmc-phosphor-image-snuc-{type}.wic.xz /dev/mmcblk0\n'.encode('utf-8'))
     callback_output("Flashing the restore image to your system...")
     await asyncio.sleep(15)
     callback_output("Factory Reset Complete. Please let the BMC reboot.")
-    callback_progress(100)
+    callback_progress(1.00)
     
     ser.write(b'reboot\n')
     ser.close()
