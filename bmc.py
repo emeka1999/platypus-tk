@@ -295,47 +295,61 @@ async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, call
     else:
         type = 'nanobmc'
 
-    start_server(directory, port, callback_output)
-    callback_progress(.10)
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)  
 
-    await asyncio.sleep(2)
-    ser.write(f'setenv ipaddr {bmc_ip}\n'.encode('utf-8'))
-    callback_output("Setting IP Address (bootloader)...")
-    callback_progress(.20)
+    try: 
+        start_server(directory, port, callback_output)
+        callback_progress(.10)
+        ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)  
 
-    await asyncio.sleep(2)
-    ser.write(f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-{type}.itb; bootm\n'.encode('utf-8'))
-    callback_output("Grabbing virtual restore image...")
-    callback_progress(.40)
+        callback_output("Setting IP Address (bootloader)...")
+        command = f'setenv ipaddr {bmc_ip}\n'
+        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
+        callback_output(response)
+        callback_progress(.20)
 
-    await asyncio.sleep(25)
-    command = f'ifconfig eth0 up {bmc_ip}\n'
-    ser.write(command.encode('utf-8'))
-    callback_output("Setting IP Address (BMC)...")
-    callback_progress(.50)
+        callback_output("Grabbing virtual restore image...")
+        command = f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-{type}.itb; bootm\n'
+        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
+        callback_output(response)
+        callback_progress(.40)
 
-    await asyncio.sleep(2)
-    curl_command = f"curl -o obmc-phosphor-image-snuc-{type}.wic.xz {my_ip}/obmc-phosphor-image-snuc-{type}.wic.xz\n"
-    ser.write(curl_command.encode('utf-8'))
-    callback_output("Grabbing restore image to your system...")
-    callback_progress(.60)
+        callback_output("Setting IP Address (BMC)...")
+        await asyncio.sleep(20)
+        command = f'ifconfig eth0 up {bmc_ip}\n'
+        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
+        callback_output(response)
+        callback_progress(.50)
 
-    await asyncio.sleep(5)
-    curl_command = f'curl -o obmc-phosphor-image-snuc-{type}.wic.bmap {my_ip}/obmc-phosphor-image-snuc-{type}.wic.bmap\n'
-    callback_output("Grabbing the mapping file...")
-    await asyncio.sleep(5)
-    ser.write(curl_command.encode('utf-8'))
-    callback_progress(.90)
-    
-    await asyncio.sleep(5)
-    ser.write(f'bmaptool copy obmc-phosphor-image-snuc-{type}.wic.xz /dev/mmcblk0\n'.encode('utf-8'))
-    callback_output("Flashing the restore image to your system...")
-    await asyncio.sleep(15)
-    callback_output("Factory Reset Complete. Please let the BMC reboot.")
-    callback_progress(1.00)
-    
-    ser.write(b'reboot\n')
-    ser.close()
+        callback_output("Grabbing restore image to your system...")     
+        command = f"curl -o obmc-phosphor-image-snuc-{type}.wic.xz {my_ip}/obmc-phosphor-image-snuc-{type}.wic.xz\n"
+        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
+        callback_output(response)
+        callback_progress(.60)
 
+        callback_output("Grabbing the mapping file...")
+        command = f'curl -o obmc-phosphor-image-snuc-{type}.wic.bmap {my_ip}/obmc-phosphor-image-snuc-{type}.wic.bmap\n'
+        response = await asyncio.to_thread(read_serial_data, ser, command, 5)
+        callback_output(response)
+        callback_progress(.90)
+        
+        callback_output("Flashing the restore image to your system...")
+        command = f'bmaptool copy obmc-phosphor-image-snuc-{type}.wic.xz /dev/mmcblk0\n'.encode('utf-8')
+        response = await asyncio.to_thread(read_serial_data, ser, command, 5)
+        callback_output(response)
+        
+        await asyncio.sleep(15)
+        callback_output("Factory Reset Complete. Please let the BMC reboot.")
+        callback_progress(1.00)
 
+    except Exception as e: 
+        callback_output(f"Error: {e}")
+        callback_output("Exiting process...")
+        callback_output("Flash unsuccessful.")
+        ser.write(b'reset\n')
+        ser.close()
+        callback_progress(0)
+        return None
+    finally:
+        ser.write(b'reboot\n')
+        ser.close()
+        callback_progress(0)
