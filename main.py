@@ -65,6 +65,13 @@ def update_usb_status():
         for button in buttons:
             button.disable()
 
+        health_label.set_text("Health: ")
+        power_label.set_text("Power State: ")
+        firmware_version_label.set_text("Firmware Version: ")
+        manufacturer_model.set_text("Device: ")
+        ip_label.set_text(f"IP Address: ")
+
+
 
 
 # Checks for firmware file before flashing the firmware file 
@@ -143,12 +150,14 @@ def choose_directory():
 # Pick a file before initiating flashing the U-Boot 
 async def flashub_button():
     timer.deactivate()
-    if not username.value or not password.value:
+    if not username.value or not password.value or not your_ip.value:
         missing_fields = []
         if not username.value:
             missing_fields.append("Username")
         if not password.value:
             missing_fields.append("Password")
+        if not your_ip.value:
+            missing_fields.append("Host IP")
         
         # Prompt the user to fill in the missing fields
         ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
@@ -201,7 +210,7 @@ def update_ui_info(info):
 
 # Updates the ui to display the current ip address
 def update_ip(current_ip):
-    ip_label.set_text(f"Current IP Address: {current_ip}")
+    ip_label.set_text(f"IP Address: {current_ip}")
 
 
 
@@ -278,6 +287,7 @@ async def power_host():
         if not password.value:
             missing_fields.append("Password")
         ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+        return
 
     with disable():
         await bmc.power_host(username.value, password.value, output_message)
@@ -294,6 +304,7 @@ async def reboot_bmc():
         if not password.value:
             missing_fields.append("Password")
         ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+        return
 
     with disable():
         await bmc.reboot_bmc(username.value, password.value, output_message)
@@ -310,9 +321,10 @@ async def reset_bmc():
         if not password.value:
             missing_fields.append("Password")
         ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+        return
 
     with disable():
-        await bmc.reset_uboot(username.value, password.value, output_message)
+        await bmc.reset_uboot(output_message)
     timer.activate()
 
 
@@ -349,7 +361,7 @@ with ui.row().classes('w-full items-start'):
         usb_status_label = StatusLabel('Checking USB connection...')
         with ui.grid(columns=2).style('margin: 0 auto;'):
             manufacturer_model = ui.label('Device: ').classes('w-72')
-            power_label = ui.label('Power State: ').classes('w-72')
+            power_label = ui.label('Power: ').classes('w-72')
             health_label = ui.label('Health: ').classes('w-72')
             ip_label = ui.label('IP Address: ').classes('w-72')
         firmware_version_label = ui.label('Firmware Version: ').classes('w-72')
