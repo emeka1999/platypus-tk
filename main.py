@@ -1,14 +1,15 @@
 from nicegui import app, ui
 import bmc as bmc
 from contextlib import contextmanager
-import tkinter as tk
-from tkinter import filedialog
+import subprocess
+import os
 
 
 
 
 fw_content = None
 flash_file = None
+timer = None
 
 
 # Displays messages in terminal and in the ui 
@@ -27,6 +28,15 @@ def update_progress(value):
         output_message(f"Invalid progress value: {value}")
 
 
+class StatusLabel(ui.label):
+    def _handle_text_change(self, text: str) -> None:
+        super()._handle_text_change(text)
+        if 'ttyUSB0' in text:
+            self.classes(replace='text-positive')
+        else:
+            self.classes(replace='text-negative')
+
+
 
 buttons = []
 
@@ -41,9 +51,25 @@ def disable():
             button.enable()
 
 
+def usb_connected():
+    return os.path.exists('/dev/ttyUSB0')
+
+
+def update_usb_status():
+    if usb_connected():
+        usb_status_label.text = 'BMC detected on ttyUSB0'
+        for button in buttons:
+            button.enable()
+    else:
+        usb_status_label.text = 'BMC not detected'
+        for button in buttons:
+            button.disable()
+
+
 
 # Checks for firmware file before flashing the firmware file 
 async def update_button():
+    timer.deactivate()
     if not username.value or not password.value or not bmc_ip.value:
         missing_fields = []
         if not username.value:
@@ -66,11 +92,12 @@ async def update_button():
             await bmc.bmc_update(username.value, password.value, bmc_ip.value, fw_content, update_progress, output_message)
         else:
             ui.notify("Please upload a firmware file first.", position='top')
-
+    timer.activate
 
 
 # Initiates setting temporary ip address
 async def ip_button():
+    timer.deactivate()
     if not username.value or not password.value or not bmc_ip.value:
         missing_fields = []
         if not username.value:
@@ -86,7 +113,7 @@ async def ip_button():
     
     with disable():
         await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
-
+    timer.activate()
 
 
 # Opens a file dialog -> returns path only
@@ -103,9 +130,8 @@ async def choose_file():
 
 
 def choose_directory():
-    root = tk.Tk()
-    root.withdraw()
-    directory = filedialog.askdirectory()
+    result = subprocess.run(['zenity', '--file-selection', '--directory'], capture_output=True, text=True)
+    directory = result.stdout.strip()
     if directory:
         ui.notify(f"Selected directory: {directory}")
         return directory
@@ -116,6 +142,7 @@ def choose_directory():
 
 # Pick a file before initiating flashing the U-Boot 
 async def flashub_button():
+    timer.deactivate()
     if not username.value or not password.value:
         missing_fields = []
         if not username.value:
@@ -130,10 +157,11 @@ async def flashub_button():
         flash_file = await choose_file()
         if flash_file:
             await bmc.flasher(username.value, password.value, flash_file, your_ip.value, update_progress, output_message)
-
+    timer.activate()
 
 # Calls the network wipe 
-async def reset_button():
+async def net_reset_button():
+    timer.deactivate
     if not username.value or not password.value or not bmc_ip.value:
         missing_fields = []
         if not username.value:
@@ -148,7 +176,7 @@ async def reset_button():
         return
     with disable():
         await bmc.reset_ip(username.value, password.value, bmc_ip.value, update_progress, output_message)
-
+    timer.activate()
 
 
 # Not sure if I use this currently...
@@ -185,6 +213,7 @@ async def load_ip():
 
 # Grabs various information regarding the bmc
 async def load_info():
+    timer.deactivate()
     if not username.value or not password.value:
         missing_fields = []
         if not username.value:
@@ -205,11 +234,13 @@ async def load_info():
             info = bmc.bmc_info(username.value, password.value, bmc_ip.value, output_message)
             update_ui_info(info)
         await load_ip()
+    timer.activate()
 
 
 
 # Pick a file before initiating factory reset 
 async def emmc_button():
+    timer.deactivate()
     if not username.value or not password.value or not bmc_ip.value or not radio.value or not your_ip.value:
         missing_fields = []
         if not username.value:
@@ -234,6 +265,57 @@ async def emmc_button():
         else: 
             ui.notify("Please choose a directory")
 
+    timer.activate()
+
+
+
+async def power_host():
+    timer.deactivate()
+    if not username.value or not password.value:
+        missing_fields = []
+        if not username.value:
+            missing_fields.append("Username")
+        if not password.value:
+            missing_fields.append("Password")
+        ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+
+    with disable():
+        await bmc.power_host(username.value, password.value, output_message)
+    timer.activate()
+
+
+
+async def reboot_bmc():
+    timer.deactivate()
+    if not username.value or not password.value:
+        missing_fields = []
+        if not username.value:
+            missing_fields.append("Username")
+        if not password.value:
+            missing_fields.append("Password")
+        ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+
+    with disable():
+        await bmc.reboot_bmc(username.value, password.value, output_message)
+    timer.activate()
+
+
+
+async def reset_bmc():
+    timer.deactivate()
+    if not username.value or not password.value:
+        missing_fields = []
+        if not username.value:
+            missing_fields.append("Username")
+        if not password.value:
+            missing_fields.append("Password")
+        ui.notify(f"Please enter the following: {', '.join(missing_fields)}.", position='top')
+
+    with disable():
+        await bmc.reset_uboot(username.value, password.value, output_message)
+    timer.activate()
+
+
 
 
 ui.label('https://github.com/rivan2k').classes('absolute top-0 left-0 text-xs text-gray-800 p-2')
@@ -255,24 +337,30 @@ with ui.row().classes('w-full items-start'):
         with ui.grid(columns=2).style('margin: 0 auto;'):
             buttons.append(ui.button('Update BMC', on_click=update_button).classes('w-48 h-10 rounded-lg'))
             buttons.append(ui.button('Set BMC IP', on_click=ip_button).classes('w-48 h-10 rounded-lg'))
-            buttons.append(ui.button('Network Reset', on_click=reset_button).classes('w-48 h-10 rounded-lg'))
+            buttons.append(ui.button('Network Reset', on_click=net_reset_button).classes('w-48 h-10 rounded-lg'))
             buttons.append(ui.button('Flash U-Boot', on_click=flashub_button).classes('w-48 h-10 rounded-lg'))
+            buttons.append(ui.button('Power ON Host', on_click=power_host).classes('w-48 h-10 rounded-lg'))
+            buttons.append(ui.button('Reboot BMC', on_click=reboot_bmc).classes('w-48 h-10 rounded-lg'))
 
     # 2nd column
     with ui.card(align_items='start').classes('no-shadow border-[0px] w-96 h-75').style('background-color:#121212; margin-left: 15px; margin-top: 15px;'):
         ui.label('BMC Information:').classes('text-left').style('font-size: 20px;')
         buttons.append(ui.button("Load info", on_click=load_info))
-        with ui.column():
+        usb_status_label = StatusLabel('Checking USB connection...')
+        with ui.grid(columns=2).style('margin: 0 auto;'):
             manufacturer_model = ui.label('Device: ').classes('w-72')
             power_label = ui.label('Power State: ').classes('w-72')
             health_label = ui.label('Health: ').classes('w-72')
-            firmware_version_label = ui.label('Firmware Version: ').classes('w-72')
-            ip_label = ui.label('Current IP Address: ').classes('w-72')
+            ip_label = ui.label('IP Address: ').classes('w-72')
+        firmware_version_label = ui.label('Firmware Version: ').classes('w-72')
         with ui.row():
+            ui.label('Bootloader:').classes('text-left').style('font-size: 20px; text-align: left; padding-right: 90px;')
             buttons.append(ui.button('Flash eMMC', on_click=emmc_button).classes('w-48 h-10 rounded-lg'))
-            with ui.dropdown_button(icon='settings', auto_close=True):
+            with ui.dropdown_button(icon='settings', auto_close=True) as dropdown:
+                buttons.append(dropdown)
                 with ui.row():
                     radio = ui.radio({1:'MOS BMC', 2:'Nano BMC'})
+        buttons.append(ui.button('Reset BMC', on_click=reset_bmc).style('width: 300px;').classes('rounded-lg'))
 
 
 # Log box
@@ -282,8 +370,14 @@ status = ui.log().classes('h-75 w-86').style('margin: 0 auto; margin-top: 15px;'
 progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-4/5 h-2 rounded-lg absolute-bottom').style('margin: 0 auto; margin-bottom: 10px')
 progress_bar.visible = True
 
-app.native.window_args['resizable'] = False
+app.native.window_args['resizable'] = True
 
-ui.run(native=True, dark=True, title='Platypus', window_size=(850, 800), reload=False, port=8081, host='0.0.0.0')
+
+
+update_usb_status()
+timer = ui.timer(1.0, update_usb_status)
+ui.run(native=True, dark=True, title='Platypus', window_size=(950, 850), reload=False, port=8081, host='0.0.0.0')
 
 # Figure out why hitting certains buttons after other buttons causes errors 
+
+
