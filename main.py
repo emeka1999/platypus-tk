@@ -119,7 +119,12 @@ async def ip_button():
         return
     
     with disable():
-        await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
+        ip = await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
+        if ip is None:
+            output_message("No IP Address found. This may be due to the following reasons:")
+            output_message("1. Another application is accessing serial. - In this case, IP was still set.")
+            output_message("2. The BMC may not be properly connected to a network.")
+        update_ip(ip)
     timer.activate()
 
 
@@ -241,7 +246,15 @@ async def load_info():
     with disable():
         if bmc_ip.value:
             info = bmc.bmc_info(username.value, password.value, bmc_ip.value, output_message)
-            update_ui_info(info)
+            if info is None: 
+                output_message("No info gathered.")
+                health_label.set_text("Health: ")
+                power_label.set_text("Power State: ")
+                firmware_version_label.set_text("Firmware Version: ")
+                manufacturer_model.set_text("Device: ")
+                ip_label.set_text(f"IP Address: ")
+            else:
+                update_ui_info(info)
         await load_ip()
     timer.activate()
 
@@ -390,3 +403,4 @@ update_usb_status()
 timer = ui.timer(1.0, update_usb_status)
 ui.run(native=True, dark=True, title='Platypus', window_size=(950, 850), reload=False, port=8081, host='0.0.0.0')
 
+# Figure out why hitting certains buttons after other buttons causes errors 

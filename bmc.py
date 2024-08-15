@@ -1,4 +1,3 @@
-
 import urllib3
 import serial
 import redfish
@@ -110,10 +109,48 @@ def bmc_info(bmc_user, bmc_pass, bmc_ip, callback_out):
 
 
 
+# Grabs the current ip address of the bmc
+async def grab_ip(bmc_user, bmc_pass, callback_output):
+    global loggedin
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    user = f"{bmc_user}\n"
+    passw = f"{bmc_pass}\n"
+    command = "/sbin/ifconfig eth0 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'\n"
+
+    try:
+        if loggedin == False:
+            ser.write(b'\n')
+            await asyncio.sleep(2)  
+            ser.write(user.encode('utf-8'))
+            await asyncio.sleep(2)
+            ser.write(passw.encode('utf-8'))
+            await asyncio.sleep(5)
+            loggedin = True
+        
+        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
+
+        lines = response.split('\n')
+        for line in lines:
+            if '.' in line:
+                ipaddress = line
+                callback_output(ipaddress)
+                return ipaddress
+    except Exception as e:
+        callback_output(f"Error: {e}")
+        return None
+    finally:
+        ser.close()
+
+
+
+
+
+
 # Sets a temporary ip address to the bmc through serial 
 async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output):
     global loggedin
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    ser.dtr = True
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
     command = f"ifconfig eth0 up {bmc_ip}\n"
@@ -141,12 +178,14 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
         ser.write(command.encode('utf-8'))
         await asyncio.sleep(4)
 
+        ip = await grab_ip(bmc_user, bmc_pass, callback_output)
         callback_progress(1)
 
         ser.close()
         callback_output("IP set successfully.")
         await asyncio.sleep(5)
         callback_progress(0)
+        return ip
     
     except Exception as e:
         if "device reports readiness to read but returned no data" in str(e):
@@ -156,6 +195,7 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
             callback_progress(0)
             ser.close()
             callback_output(f"Error: {e}")
+            return ip
         else:
             callback_output(f"Error: {e}")
             callback_output("Exiting process. Set IP unsuccessful.")
@@ -364,39 +404,6 @@ async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress, callback_outpu
     loggedin = False   
     callback_progress(0)
 
-
-
-# Grabs the current ip address of the bmc
-async def grab_ip(bmc_user, bmc_pass, callback_output):
-    global loggedin
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    user = f"{bmc_user}\n"
-    passw = f"{bmc_pass}\n"
-    command = "/sbin/ifconfig eth0 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'\n"
-
-    try:
-        if loggedin == False:
-            ser.write(b'\n')
-            await asyncio.sleep(2)  
-            ser.write(user.encode('utf-8'))
-            await asyncio.sleep(2)
-            ser.write(passw.encode('utf-8'))
-            await asyncio.sleep(5)
-            loggedin = True
-        
-        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
-
-        lines = response.split('\n')
-        for line in lines:
-            if '.' in line:
-                ipaddress = line
-                callback_output(ipaddress)
-                return ipaddress
-    except Exception as e:
-        callback_output(f"Error: {e}")
-        return None
-    finally:
-        ser.close()
 
 
 
