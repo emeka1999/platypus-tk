@@ -1,9 +1,8 @@
 from nicegui import app, ui
 import bmc as bmc
-from contextlib import asynccontextmanager
+from contextlib import contextmanager
 import subprocess
 import os
-import asyncio
 
 
 
@@ -41,8 +40,8 @@ class StatusLabel(ui.label):
 
 buttons = []
 
-@asynccontextmanager
-async def disable():
+@contextmanager
+def disable():
     for button in buttons:
         button.disable()
     try:
@@ -120,12 +119,7 @@ async def ip_button():
         return
     
     with disable():
-        ip = await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
-        if ip is None:
-            output_message("No IP Address found. This may be due to the following reasons:")
-            output_message("1. Another application is accessing serial. - In this case, IP was still set.")
-            output_message("2. The BMC may not be properly connected to a network.")
-        update_ip(ip)
+        await bmc.set_ip(bmc_ip.value, username.value, password.value, update_progress, output_message)
     timer.activate()
 
 
@@ -203,18 +197,19 @@ def on_upload(event):
 
 
 # orgainzes various information regarding the bmc
-async def update_ui_info(info):
-    if info:
-        health_label.set_text(f"Health: {info.get('Status', {}).get('Health', 'Unknown')}")
-        power_label.set_text(f"Power: {info.get('PowerState', 'Unknown')}")
-        firmware_version_label.set_text(f"Firmware Version: {info.get('FirmwareVersion', 'Unknown')}")
-        name_model_text = f"Device: {info.get('Manufacturer', 'Unknown')} {info.get('Model', 'Unknown')}"
-        manufacturer_model.set_text(name_model_text)
+def update_ui_info(info):
+    with disable():
+        if info:
+            health_label.set_text(f"Health: {info.get('Status', {}).get('Health', 'Unknown')}")
+            power_label.set_text(f"Power: {info.get('PowerState', 'Unknown')}")
+            firmware_version_label.set_text(f"Firmware Version: {info.get('FirmwareVersion', 'Unknown')}")
+            name_model_text = f"Device: {info.get('Manufacturer', 'Unknown')} {info.get('Model', 'Unknown')}"
+            manufacturer_model.set_text(name_model_text)
 
 
 
 # Updates the ui to display the current ip address
-async def update_ip(current_ip):
+def update_ip(current_ip):
     ip_label.set_text(f"IP Address: {current_ip}")
 
 
@@ -222,7 +217,7 @@ async def update_ip(current_ip):
 # Grabs the current ip address of the bmc 
 async def load_ip():
     current_ip = await bmc.grab_ip(username.value, password.value, output_message)
-    await update_ip(current_ip)
+    update_ip(current_ip)
 
 
 # Grabs various information regarding the bmc
@@ -242,21 +237,13 @@ async def load_info():
     if not bmc_ip.value:
         ui.notify("Enter BMC IP Address for more information.")
     
-    async with disable():
+    
+    with disable():
         if bmc_ip.value:
-            info = await asyncio.to_thread(bmc.bmc_info, username.value, password.value, bmc_ip.value, output_message)
-            if info is None: 
-                output_message("No info gathered.")
-                health_label.set_text("Health: ")
-                power_label.set_text("Power State: ")
-                firmware_version_label.set_text("Firmware Version: ")
-                manufacturer_model.set_text("Device: ")
-                ip_label.set_text(f"IP Address: ")
-            else:
-                await update_ui_info(info)
+            info = bmc.bmc_info(username.value, password.value, bmc_ip.value, output_message)
+            update_ui_info(info)
         await load_ip()
     timer.activate()
-
 
 
 
@@ -370,7 +357,7 @@ with ui.row().classes('w-full items-start'):
     # 2nd column
     with ui.card(align_items='start').classes('no-shadow border-[0px] w-96 h-75').style('background-color:#121212; margin-left: 15px; margin-top: 15px;'):
         ui.label('BMC Information:').classes('text-left').style('font-size: 20px;')
-        buttons.append(ui.button("Load info", on_click=lambda: asyncio.create_task(load_info())))
+        buttons.append(ui.button("Load info", on_click=load_info))
         usb_status_label = StatusLabel('Checking USB connection...')
         with ui.grid(columns=2).style('margin: 0 auto;'):
             manufacturer_model = ui.label('Device: ').classes('w-72')
@@ -401,7 +388,5 @@ app.native.window_args['resizable'] = True
 
 update_usb_status()
 timer = ui.timer(1.0, update_usb_status)
-ui.run(native=True, dark=True, title='Platypus', window_size=(950, 850), reload=False, port=8081, host='0.0.0.0', reconnect_timeout=3)
-
-
+ui.run(native=True, dark=True, title='Platypus', window_size=(950, 850), reload=False, port=8081, host='0.0.0.0')
 

@@ -1,3 +1,4 @@
+
 import urllib3
 import serial
 import redfish
@@ -7,7 +8,6 @@ import os
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 import asyncio
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 
 
@@ -90,88 +90,30 @@ async def monitor_task(redfish_client, task_url, callback_output, callback_progr
 
 
 # Grabs various information regarding the bmc through redfish 
-# def bmc_info(bmc_user, bmc_pass, bmc_ip, callback_out):
-#     try:
-#         redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
-#         redfish_client.login(auth="session")
-#         response = redfish_client.get("/redfish/v1/Managers/bmc")
-#         if response.status == 200:
-#             bmc_info = response.dict
-#             return(bmc_info)
-#         else:
-#             callback_out(f"Failed to fetch BMC information. Status code: {response.status}")
-#             return None
-#     except Exception as e:
-#         callback_out(f"An error occurred: {str(e)}")
-#         return None
-#     finally:
-#         redfish_client.logout()
-
 def bmc_info(bmc_user, bmc_pass, bmc_ip, callback_out):
-    def _bmc_info_task():
-        try:
-            redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
-            redfish_client.login(auth="session")
-            response = redfish_client.get("/redfish/v1/Managers/bmc")
-            if response.status == 200:
-                bmc_info = response.dict
-                return bmc_info
-            else:
-                callback_out(f"Failed to fetch BMC information. Status code: {response.status}")
-                return None
-        except Exception as e:
-            callback_out(f"An error occurred: {str(e)}")
-            return None
-        finally:
-            redfish_client.logout()
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(_bmc_info_task)
-        try:
-            result = future.result(timeout=10)  # Set timeout to 10 seconds
-            return result
-        except TimeoutError:
-            callback_out("The operation timed out after 10 seconds.")
-            return None
-
-
-# Grabs the current ip address of the bmc
-async def grab_ip(bmc_user, bmc_pass, callback_output):
-    global loggedin
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    user = f"{bmc_user}\n"
-    passw = f"{bmc_pass}\n"
-    command = "/sbin/ifconfig eth0 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'\n"
-
     try:
-        if loggedin == False:
-            ser.write(b'\n')
-            await asyncio.sleep(2)  
-            ser.write(user.encode('utf-8'))
-            await asyncio.sleep(2)
-            ser.write(passw.encode('utf-8'))
-            await asyncio.sleep(5)
-            loggedin = True
-        
-        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
-
-        lines = response.split('\n')
-        for line in lines:
-            if '.' in line:
-                ipaddress = line
-                callback_output(ipaddress)
-                return ipaddress
+        redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
+        redfish_client.login(auth="session")
+        response = redfish_client.get("/redfish/v1/Managers/bmc")
+        if response.status == 200:
+            bmc_info = response.dict
+            return(bmc_info)
+        else:
+            callback_out(f"Failed to fetch BMC information. Status code: {response.status}")
+            return None
     except Exception as e:
-        callback_output(f"Error: {e}")
+        callback_out(f"An error occurred: {str(e)}")
         return None
     finally:
-        ser.close()
+        redfish_client.logout()
+
+
+
 
 # Sets a temporary ip address to the bmc through serial 
 async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output):
     global loggedin
     ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    ser.dtr = True
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
     command = f"ifconfig eth0 up {bmc_ip}\n"
@@ -199,15 +141,12 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
         ser.write(command.encode('utf-8'))
         await asyncio.sleep(4)
 
-        ip = await grab_ip(bmc_user, bmc_pass, callback_output)
-
         callback_progress(1)
 
         ser.close()
         callback_output("IP set successfully.")
         await asyncio.sleep(5)
         callback_progress(0)
-        return ip
     
     except Exception as e:
         if "device reports readiness to read but returned no data" in str(e):
@@ -217,7 +156,6 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
             callback_progress(0)
             ser.close()
             callback_output(f"Error: {e}")
-            return ip
         else:
             callback_output(f"Error: {e}")
             callback_output("Exiting process. Set IP unsuccessful.")
@@ -425,6 +363,40 @@ async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress, callback_outpu
 
     loggedin = False   
     callback_progress(0)
+
+
+
+# Grabs the current ip address of the bmc
+async def grab_ip(bmc_user, bmc_pass, callback_output):
+    global loggedin
+    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    user = f"{bmc_user}\n"
+    passw = f"{bmc_pass}\n"
+    command = "/sbin/ifconfig eth0 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'\n"
+
+    try:
+        if loggedin == False:
+            ser.write(b'\n')
+            await asyncio.sleep(2)  
+            ser.write(user.encode('utf-8'))
+            await asyncio.sleep(2)
+            ser.write(passw.encode('utf-8'))
+            await asyncio.sleep(5)
+            loggedin = True
+        
+        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
+
+        lines = response.split('\n')
+        for line in lines:
+            if '.' in line:
+                ipaddress = line
+                callback_output(ipaddress)
+                return ipaddress
+    except Exception as e:
+        callback_output(f"Error: {e}")
+        return None
+    finally:
+        ser.close()
 
 
 
