@@ -204,13 +204,12 @@ def on_upload(event):
 
 # orgainzes various information regarding the bmc
 async def update_ui_info(info):
-    async with disable():
-        if info:
-            health_label.set_text(f"Health: {info.get('Status', {}).get('Health', 'Unknown')}")
-            power_label.set_text(f"Power: {info.get('PowerState', 'Unknown')}")
-            firmware_version_label.set_text(f"Firmware Version: {info.get('FirmwareVersion', 'Unknown')}")
-            name_model_text = f"Device: {info.get('Manufacturer', 'Unknown')} {info.get('Model', 'Unknown')}"
-            manufacturer_model.set_text(name_model_text)
+    if info:
+        health_label.set_text(f"Health: {info.get('Status', {}).get('Health', 'Unknown')}")
+        power_label.set_text(f"Power: {info.get('PowerState', 'Unknown')}")
+        firmware_version_label.set_text(f"Firmware Version: {info.get('FirmwareVersion', 'Unknown')}")
+        name_model_text = f"Device: {info.get('Manufacturer', 'Unknown')} {info.get('Model', 'Unknown')}"
+        manufacturer_model.set_text(name_model_text)
 
 
 
