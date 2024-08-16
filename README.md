@@ -37,6 +37,7 @@ Once all dependencies are installed properly, you can package Platypus yourself:
   ```
 This will create a dist and build directory. There will be an executable that you can run in the dist folder.
 
-##### Usage:
+##Usage:
 
-## Set BMC IP:
+##### Set BMC IP:
+
