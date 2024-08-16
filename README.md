@@ -33,7 +33,7 @@ Enter CLI and type the following commands:
   ```
 Once all dependencies are installed properly, you can package Platypus yourself:
   ```sh
-  nicegui-pack --onefile --name "myapp" main.py
+  nicegui-pack --onefile --name "Platypus" main.py
   ```
 This will create a dist and build directory. There will be an executable that you can run in the dist folder.
 
