@@ -3,7 +3,7 @@
 > Flash various BMC components
 
 Platypus utilizes serial connection and Redfish API to flash various BMC 
-components. The simple UI removes the need to type commands into command line
+components. The simple UI removes the need to type commands into the command line
 making Platypus ideal for flashing components or different BMCs consecutively.
 
 ---
@@ -13,7 +13,7 @@ making Platypus ideal for flashing components or different BMCs consecutively.
 Platypus operates on Ubuntu 24.04 though you may be able to compile Platypus on a different version of Ubuntu.
 
 #####  Method One:
-Download the lateset release onto your system.
+Download the latest release onto your system.
 Enter CLI and type the following commands:
   ```sh
   sudo chmod +x ./dep.run 
