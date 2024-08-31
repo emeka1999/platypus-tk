@@ -9,7 +9,7 @@ qtpy
 PyQt5
 PySide2
 PyGObject
-tk
+
 
 
 
