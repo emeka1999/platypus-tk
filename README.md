@@ -7,5 +7,10 @@ components. The simple UI removes the need to type commands into the command lin
 making Platypus ideal for flashing components or different BMCs consecutively.
 
 ---
+## Installation
+   ```sh
+      snap install --dangerous --classic platypus.snap
+   ```
+
 
 
