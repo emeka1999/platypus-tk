@@ -8,11 +8,8 @@ from http.server import SimpleHTTPRequestHandler, HTTPServer
 import asyncio
 import time
 
-
-
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 loggedin = False
-
 
 # Reads serial response for a particular command
 def read_serial_data(ser, command, delay):
@@ -26,10 +23,8 @@ def read_serial_data(ser, command, delay):
         print(f"Error reading serial data: {e}")
         return ""
 
-
-
 # Updates the BMC firmware through redfish 
-async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, callback_output):
+async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, callback_output, serial_device):
     callback_output("Initializing Red Fish client...")
     redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
     callback_progress(0.25)
@@ -65,8 +60,6 @@ async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, 
     await asyncio.sleep(5)
     callback_progress(0)
 
-
-
 # Continuously grabs that status of a redfish task 
 async def monitor_task(redfish_client, task_url, callback_output, callback_progress):
     while True:
@@ -86,8 +79,6 @@ async def monitor_task(redfish_client, task_url, callback_output, callback_progr
 
         await asyncio.sleep(5)
 
-
-
 # Grabs various information regarding the bmc through redfish 
 def bmc_info(bmc_user, bmc_pass, bmc_ip, callback_out):
     try:
@@ -106,13 +97,10 @@ def bmc_info(bmc_user, bmc_pass, bmc_ip, callback_out):
     finally:
         redfish_client.logout()
 
-
-
-
 # Grabs the current ip address of the bmc
-async def grab_ip(bmc_user, bmc_pass, callback_output):
+async def grab_ip(bmc_user, bmc_pass, callback_output, serial_device):
     global loggedin
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    ser = serial.Serial(serial_device, 115200, timeout=1)
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
     command = "/sbin/ifconfig eth0 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'\n"
@@ -141,15 +129,10 @@ async def grab_ip(bmc_user, bmc_pass, callback_output):
     finally:
         ser.close()
 
-
-
-
-
-
 # Sets a temporary ip address to the bmc through serial 
-async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output):
+async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output, serial_device):
     global loggedin
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    ser = serial.Serial(serial_device, 115200, timeout=1)
     ser.dtr = True
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
@@ -159,10 +142,10 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
     callback_output("Running...")
 
     try:
-        if loggedin == False:
-            ser.flushInput()                    
+        if not loggedin:
+            ser.flushInput()
             ser.write(b'\n')
-            await asyncio.sleep(2)  
+            await asyncio.sleep(2)
             ser.write(user.encode('utf-8'))
             await asyncio.sleep(2)
             ser.write(passw.encode('utf-8'))
@@ -178,7 +161,7 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
         ser.write(command.encode('utf-8'))
         await asyncio.sleep(4)
 
-        ip = await grab_ip(bmc_user, bmc_pass, callback_output)
+        ip = await grab_ip(bmc_user, bmc_pass, callback_output, serial_device)
         callback_progress(1)
 
         ser.close()
@@ -186,25 +169,17 @@ async def set_ip(bmc_ip, bmc_user, bmc_pass, callback_progress, callback_output)
         await asyncio.sleep(5)
         callback_progress(0)
         return ip
-    
     except Exception as e:
-        if "device reports readiness to read but returned no data" in str(e):
-            callback_progress(1)
-            callback_output("IP set successfully.")
-            await asyncio.sleep(5)
-            callback_progress(0)
-            ser.close()
-            callback_output(f"Error: {e}")
-            return ip
-        else:
-            callback_output(f"Error: {e}")
-            callback_output("Exiting process. Set IP unsuccessful.")
-            callback_progress(0)
-    
+        callback_output(f"Error: {e}")
+        callback_output("Exiting process. Set IP unsuccessful.")
+        callback_progress(0)
+        ser.close()
 
-async def power_host(bmc_user, bmc_pass, callback_output):
+# Power on the host through serial
+async def power_host(bmc_user, bmc_pass, callback_output, serial_device):
     global loggedin
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    ser = serial.Serial(serial_device, 115200, timeout=1)
+    ser.dtr = True
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
     command = f"obmcutil poweron\n"
@@ -239,11 +214,11 @@ async def power_host(bmc_user, bmc_pass, callback_output):
     callback_output("Host powered on.")
     await asyncio.sleep(5)
 
-
-
-async def reboot_bmc(bmc_user, bmc_pass, callback_output):
+# Reboots the BMC through serial
+async def reboot_bmc(bmc_user, bmc_pass, callback_output, serial_device):
     global loggedin
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    ser = serial.Serial(serial_device, 115200, timeout=1)
+    ser.dtr = True
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
     command = f"reboot\n"
@@ -282,31 +257,16 @@ async def reboot_bmc(bmc_user, bmc_pass, callback_output):
 
     await asyncio.sleep(25)
 
-    
+# Function to start an HTTP server for serving files
+def start_server(directory, port, callback_output):
+    os.chdir(directory)
+    handler = SimpleHTTPRequestHandler
+    httpd = HTTPServer(('0.0.0.0', port), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    callback_output(f"Serving files from {directory} on port {port}")
+    return httpd
 
-async def reset_uboot(callback_output):
-    global loggedin
-    callback_output("Running...")
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    command = f"reset\n"
-
-    try:
-        ser.write(command.encode('utf-8'))
-    except Exception as e:
-        if "device reports readiness to read but returned no data" in str(e):
-            callback_output(f"Error: {e}")
-            callback_output("Rebooting...")
-            callback_output("Please give the BMC time to finish rebooting.")
-        else: 
-            callback_output(f"Error: {e}")
-            callback_output("Exiting Process.")
-        return
-    callback_output("Rebooting...")
-    callback_output("Please give the BMC time to finish rebooting")
-    loggedin = False
-    await asyncio.sleep(23)
-
-
+# Function to stop the HTTP server
 def stop_server(httpd, callback_output):
     if httpd:
         httpd.shutdown()
@@ -315,20 +275,8 @@ def stop_server(httpd, callback_output):
     else:
         callback_output("Server instance is None.")
 
-
-
-def start_server(directory, port, callback_output):
-    os.chdir(directory)
-    handler = SimpleHTTPRequestHandler
-    httpd = HTTPServer(('0.0.0.0', port), handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    callback_output(f"Serving files from {directory} on port {port}")
-    return httpd  # Return the server instance
-
-
-
-# Flashes the U-Boot of the BMC through serial 
-async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress, callback_output):
+# Flashes the U-Boot of the BMC through serial
+async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress, callback_output, serial_device):
     global loggedin
     directory = os.path.dirname(flash_file)
     file_name = os.path.basename(flash_file)
@@ -337,14 +285,15 @@ async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress, call
     httpd = start_server(directory, port, callback_output)
     callback_progress(0.2)
 
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    ser = serial.Serial(serial_device, 115200, timeout=1)
+    ser.dtr = True
     user = f"{bmc_user}\n"
     passw = f"{bmc_pass}\n"
 
     try:
-        if loggedin == False:
+        if not loggedin:
             ser.write(b'\n')
-            await asyncio.sleep(2)  
+            await asyncio.sleep(2)
             ser.write(user.encode('utf-8'))
             await asyncio.sleep(2)
             ser.write(passw.encode('utf-8'))
@@ -373,6 +322,12 @@ async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress, call
         await asyncio.sleep(7)
         callback_output("Flashing complete")
         callback_progress(1)
+
+        # Remove fip.bin after flashing
+        remove_command = "rm -f fip.bin\n"
+        ser.write(remove_command.encode('utf-8'))
+        await asyncio.sleep(2)
+        callback_output("fip.bin removed successfully.")
     except serial.SerialException as e:
         callback_output(f"Serial Error: {e}")
     finally:
@@ -380,101 +335,94 @@ async def flasher(bmc_user, bmc_pass, flash_file, my_ip, callback_progress, call
         stop_server(httpd, callback_output)
         callback_progress(0)
 
-
-
-# Wipes all BMC network settings 
-async def reset_ip(bmc_user, bmc_pass, bmc_ip, callback_progress, callback_output):
+# Flash EEPROM through serial
+async def flash_eeprom(bmc_user, bmc_pass, host_ip, callback_progress, callback_output, serial_device):
     global loggedin
-    callback_progress(0.4)
-    url = f"https://{bmc_ip}/redfish/v1/Managers/bmc/Actions/Manager.ResetToDefaults"
-    headers = {"Content-Type": "application/json"}
-    payload = {"ResetToDefaultsType": "ResetAll"}
-    callback_progress(0.8)
+    ser = serial.Serial(serial_device, 115200, timeout=1)
+    ser.dtr = True
+
     try:
-        response = await asyncio.to_thread(requests.post, url, json=payload, headers=headers, auth=(bmc_user, bmc_pass), verify=False)
-        if response.status_code == 200:
-            callback_output("BMC reset to factory defaults successfully.")
-            callback_progress(1)
-        else:
-            callback_output("Failed to reset BMC. Response code:", response.status_code)
-            callback_output(response.json())
+        if not loggedin:
+            # Login sequence
+            ser.write(b'\n')
+            await asyncio.sleep(2)
+            ser.write(f"{bmc_user}\n".encode())
+            await asyncio.sleep(2)
+            ser.write(f"{bmc_pass}\n".encode())
+            await asyncio.sleep(3)
+            loggedin = True
+            callback_output("Logged in.")
+            callback_progress(0.2)
+
+        # Start HTTP server
+        callback_output("Starting HTTP server...")
+        directory = os.path.dirname(__file__)
+        os.chdir(directory)
+        handler = SimpleHTTPRequestHandler
+        with HTTPServer(("", 8080), handler) as httpd:
+            callback_output(f"Serving on port 8080")
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+            # Power on
+            callback_output("Powering on...")
+            ser.write(b"obmcutil poweron\n")
+            await asyncio.sleep(5)
+            callback_progress(0.4)
+
+            # Configure EEPROM
+            callback_output("Configuring EEPROM...")
+            ser.write(b"echo 24c02 0x50 > /sys/class/i2c-adapter/i2c-1/new_device\n")
+            await asyncio.sleep(5)
+            callback_progress(0.6)
+
+            # Fetch FRU binary
+            callback_output(f"Fetching FRU binary from http://{host_ip}:8080/fru.bin")
+            ser.write(f"curl -o fru.bin http://{host_ip}:8080/fru.bin\n".encode())
+            await asyncio.sleep(5)
+            callback_progress(0.8)
+
+            # Flash EEPROM
+            callback_output("Flashing EEPROM...")
+            ser.write(b"dd if=fru.bin of=/sys/bus/i2c/devices/1-0050/eeprom\n")
+            await asyncio.sleep(5)
+            callback_progress(1.0)
+            
+            # Remove FRU binary
+            callback_output("Removing FRU binary...")
+            ser.write(b"rm -f fru.bin\n")
+            await asyncio.sleep(1)
+            callback_output("FRU binary removed successfully.")
+
+            # Reboot
+            callback_output("EEPROM flashing completed successfully.")
     except Exception as e:
-        callback_output("Error occurred:", e)
-
-    loggedin = False   
-    callback_progress(0)
-
-
-
-
-# Factory resets the BMC through serial
-async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, callback_output):
-    global loggedin
-    port = 80
-    command = 'reboot\n'
-
-    if dd_value == 1:
-        type = 'mos-bmc'
-    else:
-        type = 'nanobmc'
-
-
-    try: 
-        httpd = start_server(directory, port, callback_output)
-        callback_progress(.10)
-        ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)  
-
-        callback_output("Setting IP Address (bootloader)...")
-        command = f'setenv ipaddr {bmc_ip}\n'
-        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
-        callback_output(response)
-        callback_progress(.20)
-
-        callback_output("Grabbing virtual restore image...")
-        command = f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-{type}.itb; bootm\n'
-        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
-        callback_output(response)
-        callback_progress(.40)
-
-        callback_output("Setting IP Address (BMC)...")
-        await asyncio.sleep(20)
-        command = f'ifconfig eth0 up {bmc_ip}\n'
-        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
-        callback_output(response)
-        callback_progress(.50)
-
-        callback_output("Grabbing restore image to your system...")     
-        command = f"curl -o obmc-phosphor-image-snuc-{type}.wic.xz {my_ip}/obmc-phosphor-image-snuc-{type}.wic.xz\n"
-        response = await asyncio.to_thread(read_serial_data, ser, command, 2)
-        callback_output(response)
-        callback_progress(.60)
-
-        callback_output("Grabbing the mapping file...")
-        command = f'curl -o obmc-phosphor-image-snuc-{type}.wic.bmap {my_ip}/obmc-phosphor-image-snuc-{type}.wic.bmap\n'
-        response = await asyncio.to_thread(read_serial_data, ser, command, 5)
-        callback_output(response)
-        callback_progress(.90)
-        
-        callback_output("Flashing the restore image to your system...")
-        command = f'bmaptool copy obmc-phosphor-image-snuc-{type}.wic.xz /dev/mmcblk0\n'
-        response = await asyncio.to_thread(read_serial_data, ser, command, 5)
-        callback_output(response)
-        
-        await asyncio.sleep(15)
-        callback_output("Factory Reset Complete. Please let the BMC reboot.")
-        callback_progress(1.00)
-
-    except Exception as e: 
-        callback_output(f"Error: {e}")
-        callback_output("Exiting process...")
-        callback_output("Flash unsuccessful.")
-        ser.write(b'reset\n')
-        ser.close()
-        callback_progress(0)
-        return None
+        callback_output(f"Error during EEPROM flashing: {str(e)}")
     finally:
-        ser.write(b'reboot\n')
         ser.close()
-        stop_server(httpd, callback_output)
-        callback_progress(0)
         loggedin = False
+        callback_progress(0)
+        
+        
+async def bmc_factory_reset(callback_output, serial_device):
+    global loggedin
+    ser = serial.Serial(serial_device, 115200, timeout=1)
+    ser.dtr = True
+    command = "bmc_factory_reset manual\n"
+
+    callback_output("Executing factory reset...")
+
+    try:
+        if not loggedin:
+            ser.write(b'\n')
+            await asyncio.sleep(2)
+            callback_output("Please log in before running this command.")
+            return
+
+        ser.write(command.encode('utf-8'))
+        await asyncio.sleep(5)
+        response = ser.read_all().decode('utf-8')
+        callback_output(f"Factory reset response: {response}")
+    except Exception as e:
+        callback_output(f"Error: {e}")
+    finally:
+        ser.close()
