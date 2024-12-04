@@ -1,6 +1,6 @@
-# Platypus
+# Platypus-TK
 
-> Flash various BMC components
+> BMC configuration companion
 
 Platypus utilizes serial connection and Redfish API to flash various BMC 
 components. The simple UI removes the need to type commands into the command line
