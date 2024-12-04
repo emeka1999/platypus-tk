@@ -9,7 +9,7 @@ making Platypus ideal for flashing components or different BMCs consecutively.
 ---
 ## Installation
    ```sh
-      snap install --dangerous --classic platypus.snap
+      snap install platypus-tk-1.0.snap --devmode
    ```
 
 
