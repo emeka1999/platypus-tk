@@ -12,6 +12,84 @@ import subprocess
 from utils import login
 from network import set_ip
 
+class FlashAllWindow(ctk.CTkToplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Select Files for Flashing")
+        self.geometry("500x400")
+        
+        self.firmware_folder = ctk.StringVar()
+        self.fip_file = ctk.StringVar()
+        self.eeprom_file = ctk.StringVar()
+        
+        ctk.CTkLabel(self, text="Firmware Folder (eMMC):").pack(pady=5)
+        ctk.CTkEntry(self, textvariable=self.firmware_folder, width=400).pack()
+        ctk.CTkButton(self, text="Browse", command=self.select_firmware_folder).pack(pady=5)
+        
+        ctk.CTkLabel(self, text="FIP File (U-Boot):").pack(pady=5)
+        ctk.CTkEntry(self, textvariable=self.fip_file, width=400).pack()
+        ctk.CTkButton(self, text="Browse", command=self.select_fip_file).pack(pady=5)
+        
+        ctk.CTkLabel(self, text="EEPROM File (FRU):").pack(pady=5)
+        ctk.CTkEntry(self, textvariable=self.eeprom_file, width=400).pack()
+        ctk.CTkButton(self, text="Browse", command=self.select_eeprom_file).pack(pady=5)
+        
+        ctk.CTkButton(self, text="Start Flashing", command=self.start_flashing).pack(pady=20)
+
+    def select_firmware_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.firmware_folder.set(folder)
+    
+    def select_fip_file(self):
+        file = filedialog.askopenfilename(filetypes=[("Binary Files", "*.bin")])
+        if file:
+            self.fip_file.set(file)
+    
+    def select_eeprom_file(self):
+        file = filedialog.askopenfilename(filetypes=[("Binary Files", "*.bin")])
+        if file:
+            self.eeprom_file.set(file)
+    
+    def start_flashing(self):
+        if not self.firmware_folder.get() or not self.fip_file.get() or not self.eeprom_file.get():
+            messagebox.showerror("Error", "Please select all required files before proceeding.")
+            return
+        
+        threading.Thread(target=self.run_flash_sequence).start()
+    
+    def run_flash_sequence(self):
+        app.log_message("Starting full flashing process...")
+        
+        # Step 1: Flash eMMC
+        app.log_message("Flashing eMMC...")
+        asyncio.run(bmc.flash_emmc(app.bmc_ip.get(), self.firmware_folder.get(), app.your_ip.get(), app.bmc_type.get(), app.update_progress, app.log_message))
+        
+        # Step 2: Login to BMC
+        app.log_message("Logging into BMC...")
+        asyncio.run(login(app.username.get(), app.password.get(), app.serial_device.get(), app.log_message))
+        
+        # Step 3: Set BMC IP
+        app.log_message("Setting BMC IP...")
+        asyncio.run(set_ip(app.bmc_ip.get(), app.update_progress, app.log_message, app.serial_device.get()))
+        
+        # Step 4: Flash U-Boot
+        app.log_message("Flashing U-Boot...")
+        asyncio.run(bmc.flasher(self.fip_file.get(), app.your_ip.get(), app.update_progress, app.log_message, app.serial_device.get()))
+        
+        # Step 5: Flash EEPROM
+        app.log_message("Flashing EEPROM...")
+        asyncio.run(bmc.flash_eeprom(self.eeprom_file.get(), app.your_ip.get(), app.update_progress, app.log_message, app.serial_device.get()))
+        
+        app.log_message("Flashing process complete!")
+        app.lock_buttons = False
+
+def on_flash_all(app):
+    if app.bmc_type.get() == 0:
+        messagebox.showerror("Error", "Please select a BMC type before proceeding.")
+        return
+    FlashAllWindow(app.root)
+
 class PlatypusApp:
     def __init__(self):
         # Configure CustomTkinter
@@ -35,7 +113,7 @@ class PlatypusApp:
         self.your_ip = ctk.StringVar()
         self.flash_file = None
         self.serial_device = ctk.StringVar()
-        self.bmc_type = ctk.IntVar(value=0)
+        self.bmc_type = ctk.IntVar(value=2)
         self.lock_buttons = False
 
         # Load saved configuration
@@ -54,6 +132,10 @@ class PlatypusApp:
 
         # Bind close event
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+    def run(self):
+        """Start the GUI application."""
+        self.root.mainloop()   
 
     def create_connection_section(self):
         section = ctk.CTkFrame(self.main_frame)
@@ -375,17 +457,27 @@ class PlatypusApp:
     def flash_u_boot(self):
         if not self.validate_button_click():
             return
-        if(not self.your_ip.get() or not self.update_progress or not self.log_message or not self.serial_device.get()):
+        if (not self.your_ip.get() or not self.update_progress or 
+            not self.log_message or not self.serial_device.get()):
             self.log_message("Please enter all required fields: Username, Password, BMC IP, Host IP, and Serial Device")
             self.lock_buttons = False
             return
 
-        self.flash_file = filedialog.askopenfilename()
-        if not self.flash_file:
+        # File selection with validation
+        file_path = filedialog.askopenfilename()
+        if not file_path:
             self.log_message("No file selected.")
             self.lock_buttons = False
             return
-
+        
+        # Validate filename
+        allowed_files = {"fip-snuc-nanobmc.bin", "fip-snuc-mos-bmc.bin"}
+        if os.path.basename(file_path) not in allowed_files:
+            self.log_message("Invalid file selected. Please choose either 'fip-snuc-nanobmc.bin' or 'fip-snuc-mos-bmc.bin'.")
+            self.lock_buttons = False
+            return
+        
+        self.flash_file = file_path
         threading.Thread(target=self.run_flash_u_boot).start()
 
     def run_flash_u_boot(self):
@@ -477,13 +569,10 @@ class PlatypusApp:
             self.lock_buttons = False
             
     def on_flash_all(self):
-        self.log_message("Flash All method not implemented")
-        self.lock_buttons = False
-
-    def run(self):
-        self.root.mainloop()
+        FlashAllWindow(self.root)
 
 def main():
+    global app  # Ensure app is accessible globally if needed
     app = PlatypusApp()
     app.run()
 
