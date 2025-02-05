@@ -13,8 +13,10 @@ from utils import login
 from network import set_ip
 
 class FlashAllWindow(ctk.CTkToplevel):
-    def __init__(self, parent):
+    def __init__(self, parent, bmc_type):
+    
         super().__init__(parent)
+        self.bmc_type = bmc_type
         self.title("Select Files for Flashing")
         self.geometry("500x400")
         
@@ -30,9 +32,12 @@ class FlashAllWindow(ctk.CTkToplevel):
         ctk.CTkEntry(self, textvariable=self.fip_file, width=400).pack()
         ctk.CTkButton(self, text="Browse", command=self.select_fip_file).pack(pady=5)
         
-        ctk.CTkLabel(self, text="EEPROM File (FRU):").pack(pady=5)
-        ctk.CTkEntry(self, textvariable=self.eeprom_file, width=400).pack()
-        ctk.CTkButton(self, text="Browse", command=self.select_eeprom_file).pack(pady=5)
+        if self.bmc_type != 1:
+            ctk.CTkLabel(self, text="EEPROM File (FRU):").pack(pady=5)
+        if self.bmc_type != 1:
+            ctk.CTkEntry(self, textvariable=self.eeprom_file, width=400).pack()
+        if self.bmc_type != 1:
+            ctk.CTkButton(self, text="Browse", command=self.select_eeprom_file).pack(pady=5)
         
         ctk.CTkButton(self, text="Start Flashing", command=self.start_flashing).pack(pady=20)
 
@@ -52,7 +57,7 @@ class FlashAllWindow(ctk.CTkToplevel):
             self.eeprom_file.set(file)
     
     def start_flashing(self):
-        if not self.firmware_folder.get() or not self.fip_file.get() or not self.eeprom_file.get():
+        if not self.firmware_folder.get() or not self.fip_file.get() or (self.bmc_type != 1 and not self.eeprom_file.get()):
             messagebox.showerror("Error", "Please select all required files before proceeding.")
             return
         
@@ -84,11 +89,13 @@ class FlashAllWindow(ctk.CTkToplevel):
         app.log_message("Flashing process complete!")
         app.lock_buttons = False
 
-def on_flash_all(app):
+def on_flash_all(self):
     if app.bmc_type.get() == 0:
         messagebox.showerror("Error", "Please select a BMC type before proceeding.")
         return
-    FlashAllWindow(app.root)
+    FlashAllWindow(self.root, self.bmc_type.get())
+
+
 
 class PlatypusApp:
     def __init__(self):
@@ -569,7 +576,11 @@ class PlatypusApp:
             self.lock_buttons = False
             
     def on_flash_all(self):
-        FlashAllWindow(self.root)
+        if app.bmc_type.get() == 0:
+            messagebox.showerror("Error", "Please select a BMC type before proceeding.")
+            return
+        FlashAllWindow(self.root, self.bmc_type.get())
+
 
 def main():
     global app  # Ensure app is accessible globally if needed
