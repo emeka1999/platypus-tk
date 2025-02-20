@@ -7,7 +7,10 @@ import glob
 import bmc
 import json
 import os
+import sys
 import subprocess 
+import serial
+import serial.tools.list_ports 
 
 from utils import login
 from network import set_ip
@@ -107,6 +110,15 @@ class PlatypusApp:
         self.config_dir = os.path.expanduser("~/.local/platypus")
         os.makedirs(self.config_dir, exist_ok=True)
         self.CONFIG_FILE = os.path.join(self.config_dir, "platypus_config.json")
+
+        if sys.platform == 'win32':
+            self.config_dir = os.path.join(os.environ['APPDATA'], 'platypus')
+        else:
+            self.config_dir = os.path.expanduser("~/.local/platypus")
+        
+        os.makedirs(self.config_dir, exist_ok=True)
+        self.CONFIG_FILE = os.path.join(self.config_dir, "platypus_config.json")
+
 
         # Create main window
         self.root = ctk.CTk()
@@ -287,8 +299,29 @@ class PlatypusApp:
         self.root.destroy()
 
     def refresh_devices(self):
-        devices = glob.glob("/dev/ttyUSB*")                 
-        self.serial_device.set(devices[0] if devices else "")
+        """List available serial ports on both Windows and Unix systems."""
+        if sys.platform == 'win32':
+            # Use serial.tools.list_ports for Windows
+            ports = [port.device for port in serial.tools.list_ports.comports()]
+        else:
+            # Keep existing Unix/Linux behavior
+            ports = glob.glob("/dev/ttyUSB*")
+            
+        # Update the dropdown values and select first port if available
+        if ports:
+            # Find the CTkComboBox widget in the connection section
+            for widget in self.main_frame.winfo_children():
+                if isinstance(widget, ctk.CTkFrame):
+                    for sub_widget in widget.winfo_children():
+                        if isinstance(sub_widget, ctk.CTkFrame):
+                            for device_widget in sub_widget.winfo_children():
+                                if isinstance(device_widget, ctk.CTkComboBox):
+                                    device_widget.configure(values=ports)
+                                    self.serial_device.set(ports[0])
+                                    break
+            self.log_message(f"Found serial devices: {', '.join(ports)}")
+        else:
+            self.log_message("No serial devices found")
 
     def log_message(self, message):
         self.log_box.configure(state="normal")
@@ -307,17 +340,38 @@ class PlatypusApp:
         return True
 
     def open_minicom_console(self):
+        """Open serial console on both Windows and Unix systems."""
         if not self.serial_device.get():
             self.log_message("No serial device selected. Please select a device.")
             return
-        try:
-            self.log_message(f"Launching Minicom on {self.serial_device.get()}...")
-            subprocess.Popen(["xterm", "-e", "minicom", "-D", self.serial_device.get()])
-        except FileNotFoundError:
-            self.log_message("Minicom or xterm not found. Please ensure they are installed.")
-        except Exception as e:
-            self.log_message(f"Error launching Minicom: {e}")
 
+        try:
+            if sys.platform == 'win32':
+                # For Windows, use PuTTY if available
+                putty_path = self.find_putty()
+                if putty_path:
+                    subprocess.Popen([putty_path, '-serial', self.serial_device.get(), '-sercfg', '115200,8,n,1,N'])
+                else:
+                    self.log_message("PuTTY not found. Please install PuTTY or use another serial terminal.")
+            else:
+                # Existing Unix/Linux behavior
+                subprocess.Popen(["xterm", "-e", "minicom", "-D", self.serial_device.get()])
+        except FileNotFoundError:
+            self.log_message("Terminal program not found. Please ensure it is installed.")
+        except Exception as e:
+            self.log_message(f"Error launching terminal: {e}")
+
+    def find_putty(self):
+        """Find PuTTY executable on Windows."""
+        common_paths = [
+            os.path.join(os.environ.get('ProgramFiles', ''), 'PuTTY', 'putty.exe'),
+            os.path.join(os.environ.get('ProgramFiles(x86)', ''), 'PuTTY', 'putty.exe'),
+        ]
+        
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+        return None
     # All other methods from the original implementation would be copied here
     # This includes methods like update_bmc, login_to_bmc, set_bmc_ip, etc.
     # I'll provide a placeholder for these methods:
