@@ -8,6 +8,7 @@ import bmc
 import json
 import os
 import subprocess 
+import psutil
 
 from utils import login
 from network import set_ip
@@ -19,6 +20,9 @@ class FlashAllWindow(ctk.CTkToplevel):
         self.bmc_type = bmc_type
         self.title("Select Files for Flashing")
         self.geometry("500x400")
+        
+        # Set the window to always stay on top
+        self.attributes("-topmost", True)
         
         self.firmware_folder = ctk.StringVar()
         self.fip_file = ctk.StringVar()
@@ -42,19 +46,199 @@ class FlashAllWindow(ctk.CTkToplevel):
         ctk.CTkButton(self, text="Start Flashing", command=self.start_flashing).pack(pady=20)
 
     def select_firmware_folder(self):
-        folder = filedialog.askdirectory()
+        # Use Linux native dialog for directory selection
+        import subprocess
+        
+        folder = ""
+        
+        # Try zenity first
+        try:
+            result = subprocess.run(
+                ['zenity', '--file-selection', '--directory', '--title=Select Firmware Folder'],
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode == 0:
+                folder = result.stdout.strip()
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # If zenity fails, try kdialog
+            try:
+                result = subprocess.run(
+                    ['kdialog', '--getexistingdirectory', 'Select Firmware Folder'],
+                    capture_output=True, text=True, timeout=60
+                )
+                if result.returncode == 0:
+                    folder = result.stdout.strip()
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # Fall back to a simple entry dialog
+                dialog = ctk.CTkToplevel(self)
+                dialog.title("Enter Folder Path")
+                dialog.geometry("500x150")
+                dialog.attributes('-topmost', True)
+                
+                path_var = ctk.StringVar()
+                ctk.CTkLabel(dialog, text="Enter the full path to firmware folder:").pack(pady=10)
+                ctk.CTkEntry(dialog, textvariable=path_var, width=400).pack(pady=10)
+                
+                result_path = []  # Use a list to store the result
+                
+                def on_ok():
+                    result_path.append(path_var.get())
+                    dialog.destroy()
+                
+                def on_cancel():
+                    dialog.destroy()
+                
+                button_frame = ctk.CTkFrame(dialog)
+                button_frame.pack(fill="x", padx=20, pady=10)
+                ctk.CTkButton(button_frame, text="OK", command=on_ok, width=100).pack(side="left", padx=20)
+                ctk.CTkButton(button_frame, text="Cancel", command=on_cancel, width=100).pack(side="right", padx=20)
+                
+                # Center the dialog
+                dialog.update_idletasks()
+                width = dialog.winfo_width()
+                height = dialog.winfo_height()
+                x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+                y = (dialog.winfo_screenheight() // 2) - (height // 2)
+                dialog.geometry(f'{width}x{height}+{x}+{y}')
+                
+                dialog.grab_set()  # Make dialog modal
+                dialog.wait_window()  # Wait for dialog to close
+                
+                if result_path:
+                    folder = result_path[0]
+        
         if folder:
             self.firmware_folder.set(folder)
     
     def select_fip_file(self):
-        file = filedialog.askopenfilename(filetypes=[("Binary Files", "*.bin")])
-        if file:
-            self.fip_file.set(file)
+        # Use Linux native dialog for file selection
+        import subprocess
+        
+        file_path = ""
+        
+        # Try zenity first
+        try:
+            result = subprocess.run(
+                ['zenity', '--file-selection', '--title=Select FIP File', '--file-filter=Binary files (*.bin) | *.bin'],
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode == 0:
+                file_path = result.stdout.strip()
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # If zenity fails, try kdialog
+            try:
+                result = subprocess.run(
+                    ['kdialog', '--getopenfilename', '.', 'Binary Files (*.bin)'],
+                    capture_output=True, text=True, timeout=60
+                )
+                if result.returncode == 0:
+                    file_path = result.stdout.strip()
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # Fall back to a simple entry dialog
+                dialog = ctk.CTkToplevel(self)
+                dialog.title("Enter FIP File Path")
+                dialog.geometry("500x150")
+                dialog.attributes('-topmost', True)
+                
+                path_var = ctk.StringVar()
+                ctk.CTkLabel(dialog, text="Enter the full path to FIP file (*.bin):").pack(pady=10)
+                ctk.CTkEntry(dialog, textvariable=path_var, width=400).pack(pady=10)
+                
+                result_path = []  # Use a list to store the result
+                
+                def on_ok():
+                    result_path.append(path_var.get())
+                    dialog.destroy()
+                
+                def on_cancel():
+                    dialog.destroy()
+                
+                button_frame = ctk.CTkFrame(dialog)
+                button_frame.pack(fill="x", padx=20, pady=10)
+                ctk.CTkButton(button_frame, text="OK", command=on_ok, width=100).pack(side="left", padx=20)
+                ctk.CTkButton(button_frame, text="Cancel", command=on_cancel, width=100).pack(side="right", padx=20)
+                
+                # Center the dialog
+                dialog.update_idletasks()
+                width = dialog.winfo_width()
+                height = dialog.winfo_height()
+                x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+                y = (dialog.winfo_screenheight() // 2) - (height // 2)
+                dialog.geometry(f'{width}x{height}+{x}+{y}')
+                
+                dialog.grab_set()  # Make dialog modal
+                dialog.wait_window()  # Wait for dialog to close
+                
+                if result_path:
+                    file_path = result_path[0]
+        
+        if file_path:
+            self.fip_file.set(file_path)
     
     def select_eeprom_file(self):
-        file = filedialog.askopenfilename(filetypes=[("Binary Files", "*.bin")])
-        if file:
-            self.eeprom_file.set(file)
+        # Use Linux native dialog for file selection
+        import subprocess
+        
+        file_path = ""
+        
+        # Try zenity first
+        try:
+            result = subprocess.run(
+                ['zenity', '--file-selection', '--title=Select EEPROM File', '--file-filter=Binary files (*.bin) | *.bin'],
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode == 0:
+                file_path = result.stdout.strip()
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # If zenity fails, try kdialog
+            try:
+                result = subprocess.run(
+                    ['kdialog', '--getopenfilename', '.', 'Binary Files (*.bin)'],
+                    capture_output=True, text=True, timeout=60
+                )
+                if result.returncode == 0:
+                    file_path = result.stdout.strip()
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # Fall back to a simple entry dialog
+                dialog = ctk.CTkToplevel(self)
+                dialog.title("Enter EEPROM File Path")
+                dialog.geometry("500x150")
+                dialog.attributes('-topmost', True)
+                
+                path_var = ctk.StringVar()
+                ctk.CTkLabel(dialog, text="Enter the full path to EEPROM file (*.bin):").pack(pady=10)
+                ctk.CTkEntry(dialog, textvariable=path_var, width=400).pack(pady=10)
+                
+                result_path = []  # Use a list to store the result
+                
+                def on_ok():
+                    result_path.append(path_var.get())
+                    dialog.destroy()
+                
+                def on_cancel():
+                    dialog.destroy()
+                
+                button_frame = ctk.CTkFrame(dialog)
+                button_frame.pack(fill="x", padx=20, pady=10)
+                ctk.CTkButton(button_frame, text="OK", command=on_ok, width=100).pack(side="left", padx=20)
+                ctk.CTkButton(button_frame, text="Cancel", command=on_cancel, width=100).pack(side="right", padx=20)
+                
+                # Center the dialog
+                dialog.update_idletasks()
+                width = dialog.winfo_width()
+                height = dialog.winfo_height()
+                x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+                y = (dialog.winfo_screenheight() // 2) - (height // 2)
+                dialog.geometry(f'{width}x{height}+{x}+{y}')
+                
+                dialog.grab_set()  # Make dialog modal
+                dialog.wait_window()  # Wait for dialog to close
+                
+                if result_path:
+                    file_path = result_path[0]
+        
+        if file_path:
+            self.eeprom_file.set(file_path)
     
     def start_flashing(self):
         if not self.firmware_folder.get() or not self.fip_file.get() or (self.bmc_type != 1 and not self.eeprom_file.get()):
@@ -88,14 +272,6 @@ class FlashAllWindow(ctk.CTkToplevel):
         
         app.log_message("Flashing process complete!")
         app.lock_buttons = False
-
-def on_flash_all(self):
-    if app.bmc_type.get() == 0:
-        messagebox.showerror("Error", "Please select a BMC type before proceeding.")
-        return
-    FlashAllWindow(self.root, self.bmc_type.get())
-
-
 
 class PlatypusApp:
     def __init__(self):
@@ -189,6 +365,49 @@ class PlatypusApp:
         ctk.CTkLabel(type_frame, text="BMC Type:").pack(side="left", padx=5)
         ctk.CTkRadioButton(type_frame, text="MOS BMC", variable=self.bmc_type, value=1).pack(side="left", padx=10)
         ctk.CTkRadioButton(type_frame, text="Nano BMC", variable=self.bmc_type, value=2).pack(side="left")
+
+
+    def safe_select_directory(parent_window, title="Select Directory"):
+        """
+        A more stable directory selector that won't freeze the application
+        when used multiple times.
+        
+        Args:
+            parent_window: The parent window
+            title: Dialog title
+            
+        Returns:
+            Selected directory path or empty string if canceled
+        """
+        # Try using system dialog through zenity if available
+        try:
+            result = subprocess.run(
+                ['zenity', '--file-selection', '--directory', f'--title={title}'],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass  # Fall back to tkinter if zenity isn't available or fails
+            
+        # If zenity failed or isn't available, use a fresh tkinter dialog
+        try:
+            # Create a separate, dedicated window for the dialog
+            dialog_root = tk.Tk()
+            dialog_root.withdraw()  # Hide the window
+            dialog_root.attributes('-topmost', True)  # Keep on top
+            dialog_root.focus_force()  # Force focus
+            
+            # Use this new window as the dialog parent
+            directory = filedialog.askdirectory(parent=dialog_root, title=title)
+            
+            # Clean up
+            dialog_root.destroy()
+            
+            return directory
+        except Exception as e:
+            print(f"Error in directory selection: {e}")
+            return ""
 
     def create_bmc_operations_section(self):
         section = ctk.CTkFrame(self.main_frame)
@@ -287,8 +506,35 @@ class PlatypusApp:
         self.root.destroy()
 
     def refresh_devices(self):
-        devices = glob.glob("/dev/ttyUSB*")                 
-        self.serial_device.set(devices[0] if devices else "")
+        """Find all available serial devices and update the dropdown."""
+        # Find all serial devices
+        devices = glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")
+        
+        if not devices:
+            self.log_message("No serial devices found.")
+            self.serial_device.set("")
+            return
+        
+        # Find the dropdown widget
+        for widget in self.main_frame.winfo_children():
+            if isinstance(widget, ctk.CTkFrame):
+                for frame in widget.winfo_children():
+                    if isinstance(frame, ctk.CTkFrame):
+                        for child in frame.winfo_children():
+                            if isinstance(child, ctk.CTkComboBox):
+                                # Found the dropdown, update its values
+                                child.configure(values=devices)
+                                # Log the found devices
+                                self.log_message(f"Found {len(devices)} serial devices: {', '.join(devices)}")
+                                # Set the first device if not already set
+                                if not self.serial_device.get() and devices:
+                                    self.serial_device.set(devices[0])
+                                return
+        
+        # If we get here, we didn't find the dropdown - still set the variable
+        self.log_message(f"Found {len(devices)} serial devices, but couldn't update dropdown")
+        if devices:
+            self.serial_device.set(devices[0])
 
     def log_message(self, message):
         self.log_box.configure(state="normal")
@@ -466,38 +712,111 @@ class PlatypusApp:
             return
         if (not self.your_ip.get() or not self.update_progress or 
             not self.log_message or not self.serial_device.get()):
-            self.log_message("Please enter all required fields: Username, Password, BMC IP, Host IP, and Serial Device")
+            self.log_message("Please enter all required fields: Host IP and Serial Device")
             self.lock_buttons = False
             return
 
-        # File selection with validation
-        file_path = filedialog.askopenfilename()
-        if not file_path:
-            self.log_message("No file selected.")
-            self.lock_buttons = False
-            return
-        
-        # Validate filename
-        allowed_files = {"fip-snuc-nanobmc.bin", "fip-snuc-mos-bmc.bin"}
-        if os.path.basename(file_path) not in allowed_files:
-            self.log_message("Invalid file selected. Please choose either 'fip-snuc-nanobmc.bin' or 'fip-snuc-mos-bmc.bin'.")
-            self.lock_buttons = False
-            return
-        
-        self.flash_file = file_path
+        # Start thread for file selection and flashing
         threading.Thread(target=self.run_flash_u_boot).start()
 
     def run_flash_u_boot(self):
         self.lock_buttons = True
         try:
+            # Use Linux native file dialog
+            import subprocess
+            
+            file_path = ""
+            
+            # Try zenity first (common on most Linux distributions)
+            try:
+                result = subprocess.run(
+                    ['zenity', '--file-selection', '--title=Select FIP File', '--file-filter=Binary files (*.bin) | *.bin'],
+                    capture_output=True, text=True, timeout=60
+                )
+                if result.returncode == 0:
+                    file_path = result.stdout.strip()
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # If zenity fails or isn't available, try kdialog (KDE)
+                try:
+                    result = subprocess.run(
+                        ['kdialog', '--getopenfilename', '.', 'Binary Files (*.bin)'],
+                        capture_output=True, text=True, timeout=60
+                    )
+                    if result.returncode == 0:
+                        file_path = result.stdout.strip()
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    # If all else fails, fall back to a simple text prompt
+                    self.log_message("Could not open a graphical file dialog. Please type the file path manually...")
+                    # Create a simple entry dialog using CustomTkinter
+                    dialog = ctk.CTkToplevel(self.root)
+                    dialog.title("Enter FIP File Path")
+                    dialog.geometry("500x150")
+                    dialog.attributes('-topmost', True)
+                    
+                    path_var = ctk.StringVar()
+                    ctk.CTkLabel(dialog, text="Enter the full path to the FIP file (*.bin):").pack(pady=10)
+                    ctk.CTkEntry(dialog, textvariable=path_var, width=400).pack(pady=10)
+                    
+                    result_path = []  # Use a list to store the result
+                    
+                    def on_ok():
+                        result_path.append(path_var.get())
+                        dialog.destroy()
+                    
+                    def on_cancel():
+                        dialog.destroy()
+                    
+                    button_frame = ctk.CTkFrame(dialog)
+                    button_frame.pack(fill="x", padx=20, pady=10)
+                    ctk.CTkButton(button_frame, text="OK", command=on_ok, width=100).pack(side="left", padx=20)
+                    ctk.CTkButton(button_frame, text="Cancel", command=on_cancel, width=100).pack(side="right", padx=20)
+                    
+                    # Center the dialog
+                    dialog.update_idletasks()
+                    width = dialog.winfo_width()
+                    height = dialog.winfo_height()
+                    x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+                    y = (dialog.winfo_screenheight() // 2) - (height // 2)
+                    dialog.geometry(f'{width}x{height}+{x}+{y}')
+                    
+                    dialog.grab_set()  # Make dialog modal
+                    dialog.wait_window()  # Wait for dialog to close
+                    
+                    if result_path:
+                        file_path = result_path[0]
+            
+            if not file_path:
+                self.log_message("No file selected. Flashing aborted.")
+                self.lock_buttons = False
+                return
+                
+            # Validate filename
+            import os
+            allowed_files = {"fip-snuc-nanobmc.bin", "fip-snuc-mos-bmc.bin"}
+            if os.path.basename(file_path) not in allowed_files:
+                self.log_message("Invalid file selected. Please choose either 'fip-snuc-nanobmc.bin' or 'fip-snuc-mos-bmc.bin'.")
+                self.lock_buttons = False
+                return
+            
+            self.flash_file = file_path
+            self.log_message(f"Selected FIP file: {file_path}")
+            
+            # Run the flashing process
             asyncio.run(bmc.flasher(
                 self.flash_file, self.your_ip.get(), self.update_progress, self.log_message, self.serial_device.get()
             ))
+        except Exception as e:
+            self.log_message(f"Error during FIP flashing: {e}")
         finally:
             self.lock_buttons = False
 
     def flash_emmc(self):
-        # add type message
+        # Check if already running
+        if hasattr(self, 'emmc_operation_running') and self.emmc_operation_running:
+            self.log_message("Flash eMMC operation already in progress. Please wait for it to complete.")
+            return
+            
+        # Standard validation
         if not self.validate_button_click():
             return
         if not self.bmc_type.get():
@@ -506,7 +825,13 @@ class PlatypusApp:
             return
         if not self.bmc_ip.get() or not self.your_ip.get():
             self.log_message("Please enter all required fields: BMC IP and Host IP")
+            self.lock_buttons = False
+            return
 
+        # Set flag to indicate operation is running
+        self.emmc_operation_running = True
+        
+        # Start thread
         threading.Thread(target=self.run_flash_emmc).start()
 
     def run_flash_emmc(self):
@@ -514,12 +839,78 @@ class PlatypusApp:
         try:
             self.log_message("Starting eMMC flashing process...")
 
-            # Prompt user for firmware directory
-            firmware_directory = filedialog.askdirectory()
+            # Use Linux native file dialog
+            import subprocess
+            
+            firmware_directory = ""
+            
+            # Try zenity first (common on most Linux distributions)
+            try:
+                result = subprocess.run(
+                    ['zenity', '--file-selection', '--directory', '--title=Select Firmware Directory'],
+                    capture_output=True, text=True, timeout=60
+                )
+                if result.returncode == 0:
+                    firmware_directory = result.stdout.strip()
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # If zenity fails or isn't available, try kdialog (KDE)
+                try:
+                    result = subprocess.run(
+                        ['kdialog', '--getexistingdirectory', 'Select Firmware Directory'],
+                        capture_output=True, text=True, timeout=60
+                    )
+                    if result.returncode == 0:
+                        firmware_directory = result.stdout.strip()
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    # If all else fails, fall back to a simple text prompt
+                    self.log_message("Could not open a graphical file dialog. Please type the directory path manually...")
+                    # Create a simple entry dialog using CustomTkinter
+                    dialog = ctk.CTkToplevel(self.root)
+                    dialog.title("Enter Directory Path")
+                    dialog.geometry("500x150")
+                    dialog.attributes('-topmost', True)
+                    
+                    path_var = ctk.StringVar()
+                    ctk.CTkLabel(dialog, text="Enter the full path to firmware directory:").pack(pady=10)
+                    ctk.CTkEntry(dialog, textvariable=path_var, width=400).pack(pady=10)
+                    
+                    result_path = []  # Use a list to store the result
+                    
+                    def on_ok():
+                        result_path.append(path_var.get())
+                        dialog.destroy()
+                    
+                    def on_cancel():
+                        dialog.destroy()
+                    
+                    button_frame = ctk.CTkFrame(dialog)
+                    button_frame.pack(fill="x", padx=20, pady=10)
+                    ctk.CTkButton(button_frame, text="OK", command=on_ok, width=100).pack(side="left", padx=20)
+                    ctk.CTkButton(button_frame, text="Cancel", command=on_cancel, width=100).pack(side="right", padx=20)
+                    
+                    # Center the dialog
+                    dialog.update_idletasks()
+                    width = dialog.winfo_width()
+                    height = dialog.winfo_height()
+                    x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+                    y = (dialog.winfo_screenheight() // 2) - (height // 2)
+                    dialog.geometry(f'{width}x{height}+{x}+{y}')
+                    
+                    dialog.grab_set()  # Make dialog modal
+                    dialog.wait_window()  # Wait for dialog to close
+                    
+                    if result_path:
+                        firmware_directory = result_path[0]
+            
             if not firmware_directory:
-                self.log_message("No directory selected. Flash process aborted.")
+                self.log_message("No directory selected. Cleaning up and aborting...")
+                # Cleanup any running server processes
+                self.cleanup_server_processes()
+                self.lock_buttons = False
+                self.emmc_operation_running = False
                 return
 
+            # Continue with the flashing process
             asyncio.run(bmc.flash_emmc(
                 self.bmc_ip.get(),
                 firmware_directory,
@@ -530,8 +921,44 @@ class PlatypusApp:
             ))
         except Exception as e:
             self.log_message(f"Error during eMMC flashing: {e}")
+            # Cleanup on error
+            self.cleanup_server_processes()
         finally:
             self.lock_buttons = False
+            self.emmc_operation_running = False  # Always reset the operation flag when done
+
+    def cleanup_server_processes(self):
+        """Clean up any running server processes (TFTP, HTTP, etc.)"""
+        self.log_message("Stopping any running servers...")
+        try:
+            # Look for TFTP server processes
+            import psutil
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                # Check for TFTP or HTTP server processes that might have been started
+                if proc.info['name'] in ['tftp', 'tftpd', 'in.tftpd', 'python', 'python3', 'http.server']:
+                    try:
+                        cmdline = ' '.join(proc.info['cmdline'] or [])
+                        # If the command line contains indicators this was our server
+                        if ('tftp' in cmdline.lower() and self.your_ip.get() in cmdline) or \
+                        ('http.server' in cmdline.lower() and self.your_ip.get() in cmdline):
+                            self.log_message(f"Terminating server process: {proc.info['pid']}")
+                            proc.terminate()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+                        
+            # Execute specific kill commands for any known server processes
+            import subprocess
+            try:
+                # Try to kill any TFTP servers bound to our IP
+                subprocess.run(f"pkill -f 'tftp.*{self.your_ip.get()}'", shell=True)
+                # Try to kill any HTTP servers bound to our IP
+                subprocess.run(f"pkill -f 'http.server.*{self.your_ip.get()}'", shell=True)
+            except Exception:
+                pass
+            
+            self.log_message("Server cleanup completed.")
+        except Exception as e:
+            self.log_message(f"Warning: Error during server cleanup: {e}")
 
     def reset_bmc(self):
         if not self.validate_button_click():
@@ -550,16 +977,7 @@ class PlatypusApp:
         if not self.validate_button_click():
             return
         if not self.your_ip.get() or not self.serial_device.get():
-            self.log_message("Please entery all required fields: Host IP and Serial Device")
-            self.lock_buttons = False
-            return
-
-        self.flash_file = filedialog.askopenfilename(
-            title="Select FRU File",
-            filetypes=[("Binary Files", "*.bin"), ("All Files", "*.*")]
-        )
-        if not self.flash_file:
-            self.log_message("No file selected for EEPROM flashing.")
+            self.log_message("Please enter all required fields: Host IP and Serial Device")
             self.lock_buttons = False
             return
 
@@ -568,10 +986,83 @@ class PlatypusApp:
     def run_flash_eeprom(self):
         self.lock_buttons = True
         try:
+            # Use Linux native file dialog
+            import subprocess
+            
+            file_path = ""
+            
+            # Try zenity first (common on most Linux distributions)
+            try:
+                result = subprocess.run(
+                    ['zenity', '--file-selection', '--title=Select FRU EEPROM File', '--file-filter=Binary files (*.bin) | *.bin'],
+                    capture_output=True, text=True, timeout=60
+                )
+                if result.returncode == 0:
+                    file_path = result.stdout.strip()
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # If zenity fails or isn't available, try kdialog (KDE)
+                try:
+                    result = subprocess.run(
+                        ['kdialog', '--getopenfilename', '.', 'Binary Files (*.bin)'],
+                        capture_output=True, text=True, timeout=60
+                    )
+                    if result.returncode == 0:
+                        file_path = result.stdout.strip()
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    # If all else fails, fall back to a simple text prompt
+                    self.log_message("Could not open a graphical file dialog. Please type the file path manually...")
+                    # Create a simple entry dialog using CustomTkinter
+                    dialog = ctk.CTkToplevel(self.root)
+                    dialog.title("Enter EEPROM File Path")
+                    dialog.geometry("500x150")
+                    dialog.attributes('-topmost', True)
+                    
+                    path_var = ctk.StringVar()
+                    ctk.CTkLabel(dialog, text="Enter the full path to the FRU EEPROM file (*.bin):").pack(pady=10)
+                    ctk.CTkEntry(dialog, textvariable=path_var, width=400).pack(pady=10)
+                    
+                    result_path = []  # Use a list to store the result
+                    
+                    def on_ok():
+                        result_path.append(path_var.get())
+                        dialog.destroy()
+                    
+                    def on_cancel():
+                        dialog.destroy()
+                    
+                    button_frame = ctk.CTkFrame(dialog)
+                    button_frame.pack(fill="x", padx=20, pady=10)
+                    ctk.CTkButton(button_frame, text="OK", command=on_ok, width=100).pack(side="left", padx=20)
+                    ctk.CTkButton(button_frame, text="Cancel", command=on_cancel, width=100).pack(side="right", padx=20)
+                    
+                    # Center the dialog
+                    dialog.update_idletasks()
+                    width = dialog.winfo_width()
+                    height = dialog.winfo_height()
+                    x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+                    y = (dialog.winfo_screenheight() // 2) - (height // 2)
+                    dialog.geometry(f'{width}x{height}+{x}+{y}')
+                    
+                    dialog.grab_set()  # Make dialog modal
+                    dialog.wait_window()  # Wait for dialog to close
+                    
+                    if result_path:
+                        file_path = result_path[0]
+            
+            if not file_path:
+                self.log_message("No file selected for EEPROM flashing. Process aborted.")
+                self.lock_buttons = False
+                return
+            
+            self.flash_file = file_path
             self.log_message(f"Starting EEPROM flashing with file: {self.flash_file}")
+            
+            # Run the flashing process
             asyncio.run(bmc.flash_eeprom(
                 self.flash_file, self.your_ip.get(), self.update_progress, self.log_message, self.serial_device.get()
             ))
+        except Exception as e:
+            self.log_message(f"Error during EEPROM flashing: {e}")
         finally:
             self.lock_buttons = False
             
