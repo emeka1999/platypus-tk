@@ -8,8 +8,12 @@ making Platypus ideal for flashing components or different BMCs consecutively.
 
 ---
 ## Installation
-   ```sh
-      snap install platypus-tk-1.0.snap --devmode
+Make sure the installer script is in the same folder as the platypus executable.
+Internet connection is also needed. 
+
+   ```sudo chmod +x ./install.sh
+      sudo ./install.sh
+
    ```
 
 
