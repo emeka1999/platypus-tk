@@ -291,8 +291,8 @@ class PlatypusApp:
         # Create main window
         self.root = ctk.CTk()
         self.root.title("Platypus BMC Management")
-        self.root.geometry("800x900")
-
+        self.root.geometry("800x805")  # Adjusted to fit 1080p
+        
         # Initialize variables
         self._init_variables()
         
@@ -304,9 +304,9 @@ class PlatypusApp:
         # Load saved configuration
         self.load_config()
 
-        # Create main frame
-        self.main_frame = ctk.CTkScrollableFrame(self.root)
-        self.main_frame.pack(padx=20, pady=20, fill="both", expand=True)
+        # Create main frame - no longer using ScrollableFrame to avoid scrolling
+        self.main_frame = ctk.CTkFrame(self.root)
+        self.main_frame.pack(padx=10, pady=10, fill="both", expand=True)
 
         # Create UI sections
         self._create_ui()
@@ -341,12 +341,13 @@ class PlatypusApp:
         self.last_eeprom_dir = os.path.expanduser("~")
         
     def _create_ui(self):
-        """Create all UI sections"""
+        """Create all UI sections with reduced vertical spacing"""
         self.create_connection_section()
         self.create_bmc_operations_section()
         self.create_flashing_operations_section()
         self.create_log_section()
         self.create_progress_section()
+
         
     def load_config(self):
         """Load saved configuration from file"""
@@ -400,77 +401,78 @@ class PlatypusApp:
         self.root.destroy()
 
     def create_connection_section(self):
-        """Create the connection settings section"""
+        """Create the connection settings section with optimized spacing"""
         section = ctk.CTkFrame(self.main_frame)
-        section.pack(fill="x", pady=10)
+        section.pack(fill="x", pady=5)
         
-        ctk.CTkLabel(section, text="Connection Settings", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+        ctk.CTkLabel(section, text="Connection Settings", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
         
-        # Serial Device
+        # Serial Device - made more compact
         device_frame = ctk.CTkFrame(section)
-        device_frame.pack(fill="x", padx=20, pady=5)
+        device_frame.pack(fill="x", padx=10, pady=2)
         ctk.CTkLabel(device_frame, text="Serial Device:").pack(side="left", padx=5)
         
         # Create the dropdown with an empty list initially
-        self.serial_dropdown = ctk.CTkComboBox(device_frame, variable=self.serial_device, values=[])
+        self.serial_dropdown = ctk.CTkComboBox(device_frame, variable=self.serial_device, values=[], height=28)
         self.serial_dropdown.pack(side="left", expand=True, fill="x", padx=5)
         
-        ctk.CTkButton(device_frame, text="Refresh", command=self.refresh_devices, width=100).pack(side="right", padx=5)
+        ctk.CTkButton(device_frame, text="Refresh", command=self.refresh_devices, width=80, height=28).pack(side="right", padx=5)
 
-        # Credentials
+        # Credentials - made more compact using grid
         cred_frame = ctk.CTkFrame(section)
-        cred_frame.pack(fill="x", padx=20, pady=5)
+        cred_frame.pack(fill="x", padx=10, pady=2)
         
-        ctk.CTkLabel(cred_frame, text="Username:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        ctk.CTkEntry(cred_frame, textvariable=self.username).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkLabel(cred_frame, text="Username:").grid(row=0, column=0, padx=5, pady=2, sticky="e")
+        ctk.CTkEntry(cred_frame, textvariable=self.username, height=28).grid(row=0, column=1, padx=5, pady=2, sticky="ew")
         
-        ctk.CTkLabel(cred_frame, text="Password:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
-        ctk.CTkEntry(cred_frame, textvariable=self.password, show='*').grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkLabel(cred_frame, text="Password:").grid(row=1, column=0, padx=5, pady=2, sticky="e")
+        ctk.CTkEntry(cred_frame, textvariable=self.password, show='*', height=28).grid(row=1, column=1, padx=5, pady=2, sticky="ew")
         
         cred_frame.grid_columnconfigure(1, weight=1)
 
-        # IP Settings
+        # IP Settings - made more compact
         ip_frame = ctk.CTkFrame(section)
-        ip_frame.pack(fill="x", padx=20, pady=5)
+        ip_frame.pack(fill="x", padx=10, pady=2)
         
-        ctk.CTkLabel(ip_frame, text="BMC IP:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        ctk.CTkEntry(ip_frame, textvariable=self.bmc_ip).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        ctk.CTkLabel(ip_frame, text="BMC IP:").grid(row=0, column=0, padx=5, pady=2, sticky="e")
+        ctk.CTkEntry(ip_frame, textvariable=self.bmc_ip, height=28).grid(row=0, column=1, padx=5, pady=2, sticky="ew")
         
-        ctk.CTkLabel(ip_frame, text="Host IP:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        ctk.CTkLabel(ip_frame, text="Host IP:").grid(row=1, column=0, padx=5, pady=2, sticky="e")
         
         # Create a frame for the Host IP dropdown and refresh button
         host_ip_frame = ctk.CTkFrame(ip_frame)
-        host_ip_frame.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        host_ip_frame.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
         
         # Create a single dropdown bound to your_ip
-        self.ip_dropdown = ctk.CTkComboBox(host_ip_frame, variable=self.your_ip)
+        self.ip_dropdown = ctk.CTkComboBox(host_ip_frame, variable=self.your_ip, height=28)
         self.ip_dropdown.pack(side="left", expand=True, fill="x")
         
         # Add a refresh button
-        ctk.CTkButton(host_ip_frame, text="↻", command=self.update_ip_dropdown, width=30).pack(side="right", padx=5)
+        ctk.CTkButton(host_ip_frame, text="↻", command=self.update_ip_dropdown, width=28, height=28).pack(side="right", padx=5)
         
         ip_frame.grid_columnconfigure(1, weight=1)
 
-        # BMC Type
+        # BMC Type - made more compact
         type_frame = ctk.CTkFrame(section)
-        type_frame.pack(fill="x", padx=20, pady=5)
+        type_frame.pack(fill="x", padx=10, pady=2)
         
         ctk.CTkLabel(type_frame, text="BMC Type:").pack(side="left", padx=5)
         ctk.CTkRadioButton(type_frame, text="MOS BMC", variable=self.bmc_type, value=1).pack(side="left", padx=10)
         ctk.CTkRadioButton(type_frame, text="Nano BMC", variable=self.bmc_type, value=2).pack(side="left")
 
     def create_bmc_operations_section(self):
-        """Create the BMC operations section"""
+        """Create the BMC operations section with optimized spacing"""
         section = ctk.CTkFrame(self.main_frame)
-        section.pack(fill="x", pady=10)
+        section.pack(fill="x", pady=5)
         
-        ctk.CTkLabel(section, text="BMC Operations", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+        ctk.CTkLabel(section, text="BMC Operations", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
         
         op_frame = ctk.CTkFrame(section)
-        op_frame.pack(fill="x", padx=20)
+        op_frame.pack(fill="x", padx=10)
         
         ops = [
             ("Update BMC", self.update_bmc),
+            ("Update BIOS", self.update_bios),
             ("Login to BMC", self.login_to_bmc),
             ("Set BMC IP", self.set_bmc_ip),
             ("Power ON Host", self.power_on_host),
@@ -480,19 +482,20 @@ class PlatypusApp:
         
         for i, (text, command) in enumerate(ops):
             row, col = divmod(i, 3)
-            ctk.CTkButton(op_frame, text=text, command=command).grid(row=row, column=col, padx=5, pady=5, sticky="ew")
+            ctk.CTkButton(op_frame, text=text, command=command, height=28).grid(row=row, column=col, padx=3, pady=3, sticky="ew")
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
 
+
     def create_flashing_operations_section(self):
-        """Create the flashing operations section"""
+        """Create the flashing operations section with optimized spacing"""
         section = ctk.CTkFrame(self.main_frame)
-        section.pack(fill="x", pady=10)
+        section.pack(fill="x", pady=5)
         
-        ctk.CTkLabel(section, text="Flashing Operations", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+        ctk.CTkLabel(section, text="Flashing Operations", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
         
         op_frame = ctk.CTkFrame(section)
-        op_frame.pack(fill="x", padx=20)
+        op_frame.pack(fill="x", padx=10)
         
         ops = [
             ("Flash FIP (U-Boot)", self.flash_u_boot),
@@ -504,29 +507,29 @@ class PlatypusApp:
         
         for i, (text, command) in enumerate(ops):
             row, col = divmod(i, 3)
-            ctk.CTkButton(op_frame, text=text, command=command).grid(row=row, column=col, padx=5, pady=5, sticky="ew")
+            ctk.CTkButton(op_frame, text=text, command=command, height=28).grid(row=row, column=col, padx=3, pady=3, sticky="ew")
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
 
     def create_log_section(self):
-        """Create the log section"""
+        """Create the log section with reduced height"""
         section = ctk.CTkFrame(self.main_frame)
-        section.pack(fill="x", pady=10)
+        section.pack(fill="x", pady=5)
         
-        ctk.CTkLabel(section, text="Log", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+        ctk.CTkLabel(section, text="Log", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
         
-        self.log_box = ctk.CTkTextbox(section, height=200, state="disabled")
-        self.log_box.pack(padx=20, pady=10, fill="x")
+        self.log_box = ctk.CTkTextbox(section, height=150, state="disabled")  # Reduced height from 200
+        self.log_box.pack(padx=10, pady=5, fill="x")
 
     def create_progress_section(self):
-        """Create the progress section and console button"""
+        """Create the progress section and console button with optimized spacing"""
         section = ctk.CTkFrame(self.main_frame)
-        section.pack(fill="x", pady=10)
+        section.pack(fill="x", pady=5)
         
         progress_frame = ctk.CTkFrame(section)
-        progress_frame.pack(fill="x", padx=20)
+        progress_frame.pack(fill="x", padx=10, pady=5)
         
-        ctk.CTkButton(progress_frame, text="Console", command=self.open_minicom_console).pack(side="left", padx=5)
+        ctk.CTkButton(progress_frame, text="Console", command=self.open_minicom_console, height=28).pack(side="left", padx=5)
         
         self.progress = ctk.CTkProgressBar(progress_frame)
         self.progress.pack(side="left", expand=True, fill="x", padx=5)
@@ -1094,6 +1097,77 @@ class PlatypusApp:
             messagebox.showerror("Error", "Please select a BMC type before proceeding.")
             return
         FlashAllWindow(self.root, self.bmc_type.get(), self)
+
+    def update_bios(self):
+        """Update BIOS firmware"""
+        required = {
+            "Username": self.username.get(),
+            "Password": self.password.get(),
+            "BMC IP": self.bmc_ip.get()
+        }
+        self._run_operation(
+            self.run_update_bios,
+            required_fields=required,
+            error_msg="Please enter all required fields: Username, Password, BMC IP"
+    )
+
+    def update_bios(self):
+        """Update BIOS firmware"""
+        required = {
+            "Username": self.username.get(),
+            "Password": self.password.get(),
+            "BMC IP": self.bmc_ip.get()
+        }
+        self._run_operation(
+            self.run_update_bios,
+            required_fields=required,
+            error_msg="Please enter all required fields: Username, Password, BMC IP"
+        )
+
+    def run_update_bios(self):
+        """Run BIOS update operation"""
+        try:
+            # Select firmware file
+            self.flash_file = FileSelectionHelper.select_file(
+                self.root, 
+                "Select BIOS Firmware",
+                self.last_firmware_dir,
+                "BIOS Firmware Files (*.tar.gz)"
+            )
+            
+            if not self.flash_file:
+                self.log_message("No BIOS firmware file selected.")
+                self.lock_buttons = False
+                return
+                
+            # Display confirmation message due to lengthy update process
+            if not messagebox.askyesno("Confirm BIOS Update", 
+                                    "BIOS update can take up to 7 minutes and requires system restart.\n\n"
+                                    "During this process, do not power off the system or interrupt the update.\n\n"
+                                    "Do you want to continue?"):
+                self.log_message("BIOS update cancelled by user.")
+                self.lock_buttons = False
+                return
+            
+            self.log_message("BIOS update started. This will take approximately 7 minutes.")
+            self.log_message("WARNING: Do NOT interrupt the power during this process!")
+                
+            with open(self.flash_file, 'rb') as fw_file:
+                fw_content = fw_file.read()
+                self.log_message("Uploading BIOS firmware image (tar.gz) to BMC...")
+
+                asyncio.run(bmc.bios_update(
+                    self.username.get(),
+                    self.password.get(),
+                    self.bmc_ip.get(),
+                    fw_content,
+                    self.update_progress,
+                    self.log_message,
+                ))
+        except Exception as e:
+            self.log_message(f"Error during BIOS update: {e}")
+        finally:
+            self.lock_buttons = False
 
 def main():
     """Main entry point for the application"""
