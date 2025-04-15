@@ -309,14 +309,15 @@ class FlashAllWindow(ctk.CTkToplevel):
             bmc_type
         )
         
+
 class PlatypusApp:
     def __init__(self):
         # Configure CustomTkinter
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        # Create main window
-        self.root = ctk.CTk()
+        # Create main window with specific class name
+        self.root = ctk.CTk(className="PlatypusApp")  # Set class name during creation
         self.root.title("Platypus BMC Management")
         self.root.geometry("800x805")  # Adjusted to fit 1080p
         
@@ -328,10 +329,19 @@ class PlatypusApp:
         os.makedirs(self.config_dir, exist_ok=True)
         self.CONFIG_FILE = os.path.join(self.config_dir, "platypus_config.json")
 
+        # Try to set icon (optional)
+        try:
+            icon_path = os.path.join(self.config_dir, "platypus_icon.png")
+            if os.path.exists(icon_path):
+                img = tk.PhotoImage(file=icon_path)
+                self.root.iconphoto(True, img)
+        except Exception:
+            pass  # Continue without icon if there's an error
+
         # Load saved configuration
         self.load_config()
 
-        # Create main frame - no longer using ScrollableFrame to avoid scrolling
+        # Create main frame
         self.main_frame = ctk.CTkFrame(self.root)
         self.main_frame.pack(padx=10, pady=10, fill="both", expand=True)
 
@@ -654,7 +664,6 @@ class PlatypusApp:
             ("Set BMC IP", self.set_bmc_ip),
             ("Power ON Host", self.power_on_host),
             ("Reboot BMC", self.reboot_bmc),
-            ("Virtual Media", self.mount_virtual_media),  # New button
             ("Factory Reset", self.factory_reset)
         ]
         
@@ -665,28 +674,29 @@ class PlatypusApp:
         op_frame.grid_columnconfigure((0,1,2), weight=1)
 
     def create_flashing_operations_section(self):
-        """Create the flashing operations section with optimized spacing"""
-        section = ctk.CTkFrame(self.main_frame)
-        section.pack(fill="x", pady=5)
-        
-        ctk.CTkLabel(section, text="Flashing Operations", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
-        
-        op_frame = ctk.CTkFrame(section)
-        op_frame.pack(fill="x", padx=10)
-        
-        ops = [
-            ("Flash FIP (U-Boot)", self.flash_u_boot),
-            ("Flash eMMC", self.flash_emmc),
-            ("Reset BMC", self.reset_bmc),
-            ("Flash FRU (EEPROM)", self.flash_eeprom),
-            ("Flash All", self.on_flash_all)
-        ]
-        
-        for i, (text, command) in enumerate(ops):
-            row, col = divmod(i, 3)
-            ctk.CTkButton(op_frame, text=text, command=command, height=28).grid(row=row, column=col, padx=3, pady=3, sticky="ew")
-        
-        op_frame.grid_columnconfigure((0,1,2), weight=1)
+            """Create the flashing operations section with optimized spacing"""
+            section = ctk.CTkFrame(self.main_frame)
+            section.pack(fill="x", pady=5)
+            
+            ctk.CTkLabel(section, text="Flashing Operations", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+            
+            op_frame = ctk.CTkFrame(section)
+            op_frame.pack(fill="x", padx=10)
+            
+            ops = [
+                ("Flash FIP (U-Boot)", self.flash_u_boot),
+                ("Flash eMMC", self.flash_emmc),
+                ("Reset BMC", self.reset_bmc),
+                ("Flash FRU (EEPROM)", self.flash_eeprom),
+                ("Flash All", self.on_flash_all),
+                ("Reboot to Bootloader", self.reboot_to_bootloader)  # New button added here
+            ]
+            
+            for i, (text, command) in enumerate(ops):
+                row, col = divmod(i, 3)
+                ctk.CTkButton(op_frame, text=text, command=command, height=28).grid(row=row, column=col, padx=3, pady=3, sticky="ew")
+            
+            op_frame.grid_columnconfigure((0,1,2), weight=1)
 
     def create_log_section(self):
         """Create the log section with reduced height"""
@@ -816,94 +826,6 @@ class PlatypusApp:
             else:
                 print(f"Error updating network interfaces: {e}")
 
-
-
-    def create_virtual_media_menu(self):
-        """Create a Virtual Media submenu window"""
-        vm_window = ctk.CTkToplevel(self.root)
-        vm_window.title("Virtual Media Operations")
-        vm_window.geometry("300x200")
-        vm_window.attributes("-topmost", True)
-        
-        # Center the window
-        vm_window.update_idletasks()
-        width = vm_window.winfo_width()
-        height = vm_window.winfo_height()
-        x = (vm_window.winfo_screenwidth() // 2) - (width // 2)
-        y = (vm_window.winfo_screenheight() // 2) - (height // 2)
-        vm_window.geometry(f'{width}x{height}+{x}+{y}')
-        
-        # Create buttons
-        ctk.CTkLabel(vm_window, text="Virtual Media Operations", 
-                    font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
-        
-        ctk.CTkButton(vm_window, text="Mount ISO", 
-                    command=self.mount_virtual_media, 
-                    height=35).pack(fill="x", padx=20, pady=10)
-        
-        ctk.CTkButton(vm_window, text="Eject Media", 
-                    command=self.eject_virtual_media, 
-                    height=35).pack(fill="x", padx=20, pady=10)
-        
-        # Make the window modal
-        vm_window.grab_set()
-        vm_window.focus_set()
-
-    # Update the BMC Operations button handler to call this menu
-    def handle_virtual_media(self):
-        """Show virtual media operations menu"""
-        self.create_virtual_media_menu()
-
-    # Update the virtual media button in create_bmc_operations_section
-    # Replace the previous "Virtual Media" entry with this:
-    # ("Virtual Media", self.handle_virtual_media)
-    
-
-    def eject_virtual_media(self):
-        """Eject any mounted virtual media"""
-        required = {
-            "Username": self.username.get(),
-            "Password": self.password.get(),
-            "BMC IP": self.bmc_ip.get()
-        }
-        if self._run_operation(
-            self.run_eject_virtual_media,
-            required_fields=required,
-            error_msg="Please enter all required fields: Username, Password, and BMC IP"
-        ):
-            self.log_message("Starting Virtual Media ejection operation...")
-
-    def run_eject_virtual_media(self):
-        """Run Virtual Media ejection operation"""
-        try:
-            self.log_message("Ejecting virtual media...")
-            result = asyncio.run(bmc.eject_virtual_media(
-                self.username.get(),
-                self.password.get(),
-                self.bmc_ip.get(),
-                self.update_progress,
-                self.log_message
-            ))
-            
-            if result:
-                self.log_message("Virtual Media ejected successfully.")
-                
-                # Ask if user wants to stop the HTTP server
-                if messagebox.askyesno(
-                    "Stop HTTP Server", 
-                    "Do you want to stop any running HTTP server?\n\n"
-                    "This will free up port 80 if it's currently in use."
-                ):
-                    self.force_close_port_80()
-                    self.log_message("HTTP server stopped.")
-            else:
-                self.log_message("Failed to eject virtual media.")
-                
-        except Exception as e:
-            self.log_message(f"Error during virtual media ejection: {e}")
-        finally:
-            self.lock_buttons = False
-
     def log_message(self, message):
         """Add a message to the log box"""
         if hasattr(self, 'log_box') and self.log_box:
@@ -998,79 +920,7 @@ class PlatypusApp:
 
 
 
-    def mount_virtual_media(self):
-        """Mount virtual media (ISO) via Redfish"""
-        required = {
-            "Username": self.username.get(),
-            "Password": self.password.get(),
-            "BMC IP": self.bmc_ip.get(),
-            "Host IP": self.your_ip.get()
-        }
-        if self._run_operation(
-            self.run_mount_virtual_media,
-            required_fields=required,
-            error_msg="Please enter all required fields: Username, Password, BMC IP, and Host IP"
-        ):
-            self.log_message("Starting Virtual Media mounting operation...")
 
-    def run_mount_virtual_media(self):
-        """Run Virtual Media mounting operation optimized for OpenBMC"""
-        try:
-            # First, clean up any existing servers
-            self.force_close_port_80()
-            
-            # Select ISO file
-            iso_file = FileSelectionHelper.select_file(
-                self.root, 
-                "Select ISO Image",
-                self.last_firmware_dir,
-                "ISO Images (*.iso) | *.iso"
-            )
-            
-            if not iso_file:
-                self.log_message("No ISO file selected. Operation aborted.")
-                self.lock_buttons = False
-                return
-                
-            # Update last used directory
-            self.last_firmware_dir = os.path.dirname(iso_file)
-            self.save_config()
-            
-            self.log_message(f"Selected ISO file: {iso_file}")
-            
-            # Use the OpenBMC-specific implementation
-            result = asyncio.run(bmc.mount_virtual_media_openbmc(
-                self.username.get(),
-                self.password.get(),
-                self.bmc_ip.get(),
-                iso_file,
-                self.your_ip.get(),
-                self.update_progress,
-                self.log_message
-            ))
-            
-            if result:
-                self.log_message("Virtual Media mounted successfully.")
-                
-                # Ask if user wants to keep the server running
-                if messagebox.askyesno(
-                    "Server Running", 
-                    "HTTP server is running to serve the ISO.\n\n"
-                    "Do you want to keep the server running?\n\n"
-                    "Note: You must keep the server running for the virtual media to remain accessible."
-                ):
-                    self.log_message("HTTP server will continue running in the background.")
-                    self.log_message("Remember to close the application properly when done.")
-                else:
-                    self.log_message("Stopping HTTP server. Virtual media may no longer be accessible.")
-                    self.force_close_port_80()
-            else:
-                self.log_message("Failed to mount virtual media.")
-                
-        except Exception as e:
-            self.log_message(f"Error during virtual media mount: {e}")
-        finally:
-            self.lock_buttons = False
     
     def update_bmc(self):
         """Update BMC firmware"""
@@ -1507,6 +1357,31 @@ class PlatypusApp:
                 ))
         except Exception as e:
             self.log_message(f"Error during BIOS update: {e}")
+        finally:
+            self.lock_buttons = False
+
+    def reboot_to_bootloader(self):
+        """Reboot the OpenBMC to bootloader (U-Boot)"""
+        required = {"Serial Device": self.serial_device.get()}
+        if self._run_operation(
+            self.run_reboot_to_bootloader,
+            required_fields=required,
+            error_msg="Please select a serial device before attempting to reboot to bootloader"
+        ):
+            self.log_message("Sending reboot to U-Boot command...")
+
+    def run_reboot_to_bootloader(self):
+        """Run reboot to U-Boot bootloader operation for OpenBMC"""
+        try:
+            # Call the OpenBMC-specific reset to U-Boot function
+            asyncio.run(bmc.reset_to_uboot(self.log_message, self.serial_device.get()))
+            
+            # Inform user about U-Boot interaction
+            self.log_message("System should now be at the U-Boot prompt")
+            self.log_message("TIP: Use the Console button to interact with U-Boot if needed")
+                
+        except Exception as e:
+            self.log_message(f"Error rebooting to bootloader: {e}")
         finally:
             self.lock_buttons = False
 
