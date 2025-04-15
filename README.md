@@ -12,8 +12,9 @@ Make sure the installer script is in the same folder as the platypus executable.
 Internet connection is also needed. 
 
    ```
-      sudo chmod +x ./install.sh
-      sudo ./install.sh
+      1. Extract Archive in folder. 
+      2. sudo chmod +x ./install.sh
+      3. sudo ./install.sh
 
    ```
 
