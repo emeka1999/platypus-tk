@@ -7,6 +7,7 @@ import glob
 import bmc
 import json
 import os
+import time
 import subprocess 
 import psutil
 from functools import partial
@@ -132,16 +133,70 @@ class FlashAllWindow(ctk.CTkToplevel):
         self.title("Select Files for Flashing")
         self.geometry("500x400")
         
-        # Set the window to always stay on top
-        self.attributes("-topmost", True)
+        # Set parent relationship but DON'T make it modal
+        self.transient(parent)
         
+        # Initialize variables
         self.firmware_folder = ctk.StringVar()
         self.fip_file = ctk.StringVar()
         self.eeprom_file = ctk.StringVar()
         
+        # Load previously selected files from config
+        self.load_previous_selections()
+        
         # Create UI elements
         self._create_ui()
         
+        # Position window relative to parent
+        self.position_window()
+
+    def load_previous_selections(self):
+        """Load previously selected files from app config"""
+        # Check if the app has these attributes
+        if hasattr(self.app_instance, 'last_flash_all_folder'):
+            self.firmware_folder.set(self.app_instance.last_flash_all_folder)
+        
+        if hasattr(self.app_instance, 'last_flash_all_fip'):
+            self.fip_file.set(self.app_instance.last_flash_all_fip)
+            
+        if hasattr(self.app_instance, 'last_flash_all_eeprom'):
+            self.eeprom_file.set(self.app_instance.last_flash_all_eeprom)
+
+    def save_selections_to_config(self):
+        """Save current selections to app config"""
+        if self.firmware_folder.get():
+            self.app_instance.last_flash_all_folder = self.firmware_folder.get()
+            
+        if self.fip_file.get():
+            self.app_instance.last_flash_all_fip = self.fip_file.get()
+            
+        if self.eeprom_file.get():
+            self.app_instance.last_flash_all_eeprom = self.eeprom_file.get()
+            
+        # Save config if the method exists
+        if hasattr(self.app_instance, 'save_config'):
+            self.app_instance.save_config()
+
+    def position_window(self):
+        """Position the window relative to parent"""
+        # Update window info before getting sizes
+        self.update_idletasks()
+        
+        # Get window size
+        width = self.winfo_width()
+        height = self.winfo_height()
+        
+        # Get parent position and size
+        parent_x = self.parent.winfo_rootx()
+        parent_y = self.parent.winfo_rooty()
+        
+        # Calculate position - center on parent
+        x = parent_x + 50  # Offset slightly from parent window
+        y = parent_y + 50
+        
+        # Set window position
+        self.geometry(f'+{x}+{y}')
+    
     def _create_ui(self):
         """Create all UI elements for the flash all window"""
         ctk.CTkLabel(self, text="Firmware Folder (eMMC):").pack(pady=5)
@@ -161,53 +216,70 @@ class FlashAllWindow(ctk.CTkToplevel):
     
     def select_firmware_folder(self):
         """Select firmware folder for flashing eMMC"""
+        # Start with last selected folder or fall back to general firmware dir
+        last_dir = self.firmware_folder.get()
+        if not last_dir:
+            last_dir = app.last_firmware_dir if hasattr(app, 'last_firmware_dir') else os.path.expanduser("~")
+        
         folder = FileSelectionHelper.select_directory(
-            self, "Select Firmware Folder", 
-            app.last_firmware_dir if hasattr(app, 'last_firmware_dir') else os.path.expanduser("~")
+            self, "Select Firmware Folder", last_dir
         )
         
         if folder:
             self.firmware_folder.set(folder)
-            # Save the last used directory
+            # Save to both specific and general folder paths
+            self.app_instance.last_flash_all_folder = folder
             if hasattr(app, 'last_firmware_dir'):
                 app.last_firmware_dir = os.path.dirname(folder) or folder
-                # Save the configuration if method exists
-                if hasattr(app, 'save_config'):
-                    app.save_config()
+            # Save the configuration if method exists
+            if hasattr(app, 'save_config'):
+                app.save_config()
     
     def select_fip_file(self):
         """Select FIP file for flashing U-Boot"""
+        # Start with last selected FIP file directory or fall back to general FIP dir
+        last_dir = os.path.dirname(self.fip_file.get()) if self.fip_file.get() else None
+        if not last_dir:
+            last_dir = app.last_fip_dir if hasattr(app, 'last_fip_dir') else os.path.expanduser("~")
+        
         file_path = FileSelectionHelper.select_file(
             self, "Select FIP File", 
-            app.last_fip_dir if hasattr(app, 'last_fip_dir') else os.path.expanduser("~"),
+            last_dir,
             "Binary files (*.bin) | *.bin"
         )
         
         if file_path:
             self.fip_file.set(file_path)
-            # Save the last used directory
+            # Save to both specific and general file paths
+            self.app_instance.last_flash_all_fip = file_path
             if hasattr(app, 'last_fip_dir'):
                 app.last_fip_dir = os.path.dirname(file_path)
-                # Save the configuration if method exists
-                if hasattr(app, 'save_config'):
-                    app.save_config()
+            # Save the configuration if method exists
+            if hasattr(app, 'save_config'):
+                app.save_config()
     
     def select_eeprom_file(self):
         """Select EEPROM file for flashing FRU"""
+        # Start with last selected EEPROM file directory or fall back to general EEPROM dir
+        last_dir = os.path.dirname(self.eeprom_file.get()) if self.eeprom_file.get() else None
+        if not last_dir:
+            last_dir = app.last_eeprom_dir if hasattr(app, 'last_eeprom_dir') else os.path.expanduser("~")
+        
         file_path = FileSelectionHelper.select_file(
             self, "Select EEPROM File", 
-            app.last_eeprom_dir if hasattr(app, 'last_eeprom_dir') else os.path.expanduser("~"),
+            last_dir,
             "Binary files (*.bin) | *.bin"
         )
         
         if file_path:
             self.eeprom_file.set(file_path)
-            # Save the last used directory
+            # Save to both specific and general file paths
+            self.app_instance.last_flash_all_eeprom = file_path
             if hasattr(app, 'last_eeprom_dir'):
                 app.last_eeprom_dir = os.path.dirname(file_path)
-                # Save the configuration if method exists
-                if hasattr(app, 'save_config'):
-                    app.save_config()
+            # Save the configuration if method exists
+            if hasattr(app, 'save_config'):
+                app.save_config()
     
     def start_flashing(self):
         """Start the full flashing sequence"""
@@ -215,73 +287,28 @@ class FlashAllWindow(ctk.CTkToplevel):
             messagebox.showerror("Error", "Please select all required files before proceeding.")
             return
         
+        # Save the selections before starting the thread
+        self.save_selections_to_config()
+        
         threading.Thread(target=self.run_flash_sequence, daemon=True).start()
+        self.destroy()  # Close the window when starting the flashing
     
     def run_flash_sequence(self):
-        """Execute the full flashing sequence in the correct order"""
-        # First, create a reference to the parent app to avoid NameError
-        try:
-            parent_app = self.app_instance  # Map the variable name to what the method expects
-        except:
-            parent_app = app  # Fallback to global app if app_instance is not available
+        """Execute the full flashing sequence by calling the main app's method"""
+        # Get required parameters
+        firmware_folder = self.firmware_folder.get()
+        fip_file = self.fip_file.get()
+        eeprom_file = self.eeprom_file.get() if hasattr(self, 'eeprom_file') else None
+        bmc_type = self.bmc_type
         
-        try:
-            # Step 1: Flash eMMC
-            app.log_message("Flashing eMMC...")
-            asyncio.run(bmc.flash_emmc(
-                app.bmc_ip.get(), 
-                self.firmware_folder.get(), 
-                app.your_ip.get(), 
-                app.bmc_type.get(), 
-                app.update_progress, 
-                app.log_message
-            ))
-            
-            # Step 2: Login to BMC
-            parent_app.log_message("Logging into BMC...")
-            asyncio.run(login(
-                parent_app.username.get(), 
-                parent_app.password.get(), 
-                parent_app.serial_device.get(), 
-                parent_app.log_message
-            ))
-            
-            # Step 3: Set BMC IP
-            parent_app.log_message("Setting BMC IP...")
-            asyncio.run(set_ip(
-                parent_app.bmc_ip.get(), 
-                parent_app.update_progress, 
-                parent_app.log_message, 
-                parent_app.serial_device.get()
-            ))
-            
-            # Step 4: Flash U-Boot
-            parent_app.log_message("Flashing U-Boot...")
-            asyncio.run(bmc.flasher(
-                self.fip_file.get(), 
-                parent_app.your_ip.get(), 
-                parent_app.update_progress, 
-                parent_app.log_message, 
-                parent_app.serial_device.get()
-            ))
-            
-            # Step 5: Flash EEPROM (if not MOS BMC)
-            if self.bmc_type != 1:
-                parent_app.log_message("Flashing EEPROM...")
-                asyncio.run(bmc.flash_eeprom(
-                    self.eeprom_file.get(), 
-                    parent_app.your_ip.get(), 
-                    parent_app.update_progress, 
-                    parent_app.log_message, 
-                    parent_app.serial_device.get()
-                ))
-            
-            parent_app.log_message("Flashing process complete!")
-        except Exception as e:
-            parent_app.log_message(f"Error during flashing sequence: {str(e)}")
-        finally:
-            parent_app.lock_buttons = False
-
+        # Call the main app's method to execute the sequence
+        self.app_instance.execute_flash_all(
+            firmware_folder,
+            fip_file,
+            eeprom_file,
+            bmc_type
+        )
+        
 class PlatypusApp:
     def __init__(self):
         # Configure CustomTkinter
@@ -340,6 +367,77 @@ class PlatypusApp:
         self.last_fip_dir = os.path.expanduser("~")
         self.last_eeprom_dir = os.path.expanduser("~")
         
+        # Flash All specific paths
+        self.last_flash_all_folder = ""
+        self.last_flash_all_fip = ""
+        self.last_flash_all_eeprom = ""
+
+    def execute_flash_all(self, firmware_folder, fip_file, eeprom_file=None, bmc_type=2):
+        """
+        Execute the complete flash all sequence using the provided files.
+        This method should be called from the FlashAllWindow.
+        """
+        self.log_message("Starting Flash All sequence...")
+        self.lock_buttons = True
+        
+        try:
+            # Step 1: Flash eMMC
+            self.log_message("Step 1: Flashing eMMC...")
+            asyncio.run(bmc.flash_emmc(
+                self.bmc_ip.get(), 
+                firmware_folder, 
+                self.your_ip.get(), 
+                self.bmc_type.get(), 
+                self.update_progress, 
+                self.log_message
+            ))
+            
+            # Step 2: Login to BMC
+            self.log_message("Step 2: Logging into BMC...")
+            asyncio.run(login(
+                self.username.get(), 
+                self.password.get(), 
+                self.serial_device.get(), 
+                self.log_message
+            ))
+            
+            # Step 3: Set BMC IP
+            self.log_message("Step 3: Setting BMC IP...")
+            asyncio.run(set_ip(
+                self.bmc_ip.get(), 
+                self.update_progress, 
+                self.log_message, 
+                self.serial_device.get()
+            ))
+            
+            # Step 4: Flash U-Boot (FIP)
+            self.log_message("Step 4: Flashing U-Boot...")
+            asyncio.run(bmc.flasher(
+                fip_file, 
+                self.your_ip.get(), 
+                self.update_progress, 
+                self.log_message, 
+                self.serial_device.get()
+            ))
+            
+            # Step 5: Flash EEPROM (if needed)
+            if bmc_type != 1 and eeprom_file:
+                self.log_message("Step 5: Flashing EEPROM...")
+                asyncio.run(bmc.flash_eeprom(
+                    eeprom_file, 
+                    self.your_ip.get(), 
+                    self.update_progress, 
+                    self.log_message, 
+                    self.serial_device.get()
+                ))
+            
+            self.log_message("Flash All sequence completed successfully!")
+        except Exception as e:
+            self.log_message(f"Error during Flash All sequence: {str(e)}")
+        finally:
+            self.lock_buttons = False
+
+        
     def _create_ui(self):
         """Create all UI sections with reduced vertical spacing"""
         self.create_connection_section()
@@ -365,6 +463,11 @@ class PlatypusApp:
                         self.last_firmware_dir = config.get("last_firmware_dir", os.path.expanduser("~"))
                         self.last_fip_dir = config.get("last_fip_dir", os.path.expanduser("~"))
                         self.last_eeprom_dir = config.get("last_eeprom_dir", os.path.expanduser("~"))
+                        
+                        # Load Flash All specific paths
+                        self.last_flash_all_folder = config.get("last_flash_all_folder", "")
+                        self.last_flash_all_fip = config.get("last_flash_all_fip", "")
+                        self.last_flash_all_eeprom = config.get("last_flash_all_eeprom", "")
                     except json.JSONDecodeError:
                         print(f"Warning: Config file {self.CONFIG_FILE} is not valid JSON. Using default values.")
                         self.save_config()
@@ -375,6 +478,67 @@ class PlatypusApp:
             print(f"Error loading configuration: {e}")
             # Continue with defaults - don't let this stop the application
             pass
+
+
+    def force_close_port_80(self):
+        """
+        Force close any processes using port 80.
+        This is a more aggressive approach than cleanup_server_processes.
+        """
+        self.log_message("Forcibly closing any processes using port 80...")
+        try:
+            # Try using lsof command to find processes
+            try:
+                result = subprocess.run(
+                    ["lsof", "-i", ":80", "-t"], 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    pids = result.stdout.strip().split('\n')
+                    for pid in pids:
+                        if pid:
+                            self.log_message(f"Killing process {pid} using port 80")
+                            subprocess.run(["kill", "-9", pid], timeout=2)
+            except (subprocess.SubprocessError, FileNotFoundError):
+                pass
+                
+            # Try using netstat command (alternative approach)
+            try:
+                result = subprocess.run(
+                    ["netstat", "-tulpn"], 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    import re
+                    # Look for lines with :80 and extract PID
+                    pattern = r'tcp\s+.*:80\s+.*LISTEN\s+(\d+)/'
+                    matches = re.findall(pattern, result.stdout)
+                    for pid in matches:
+                        self.log_message(f"Killing process {pid} using port 80")
+                        subprocess.run(["kill", "-9", pid], timeout=2)
+            except (subprocess.SubprocessError, FileNotFoundError):
+                pass
+            
+            # Use psutil as another alternative
+            for proc in psutil.process_iter(['pid', 'name', 'connections']):
+                try:
+                    for conn in proc.info['connections']:
+                        if hasattr(conn, 'laddr') and hasattr(conn.laddr, 'port') and conn.laddr.port == 80:
+                            self.log_message(f"Killing process {proc.info['pid']} ({proc.info['name']}) using port 80")
+                            psutil.Process(proc.info['pid']).kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError, AttributeError):
+                    pass
+                    
+            self.log_message("Port 80 should now be available")
+        except Exception as e:
+            self.log_message(f"Error while closing port 80 processes: {e}")
+
+        # Give a brief pause to ensure processes are fully terminated
+        time.sleep(1)
 
     def save_config(self):
         """Save current configuration to file"""
@@ -387,7 +551,12 @@ class PlatypusApp:
             # Save last directory locations
             "last_firmware_dir": self.last_firmware_dir,
             "last_fip_dir": self.last_fip_dir,
-            "last_eeprom_dir": self.last_eeprom_dir
+            "last_eeprom_dir": self.last_eeprom_dir,
+            
+            # Save Flash All specific paths
+            "last_flash_all_folder": getattr(self, 'last_flash_all_folder', ""),
+            "last_flash_all_fip": getattr(self, 'last_flash_all_fip', ""),
+            "last_flash_all_eeprom": getattr(self, 'last_flash_all_eeprom', "")
         }
         try:
             with open(self.CONFIG_FILE, 'w') as config_file:
@@ -396,8 +565,15 @@ class PlatypusApp:
             print(f"Error saving configuration: {e}")
 
     def on_close(self):
-        """Handle application closing"""
+        """Handle application closing with server cleanup"""
+        # Force close any servers before exiting
+        self.log_message("Closing application. Cleaning up servers...")
+        self.force_close_port_80()
+        
+        # Save configuration
         self.save_config()
+        
+        # Destroy the main window
         self.root.destroy()
 
     def create_connection_section(self):
@@ -460,6 +636,7 @@ class PlatypusApp:
         ctk.CTkRadioButton(type_frame, text="MOS BMC", variable=self.bmc_type, value=1).pack(side="left", padx=10)
         ctk.CTkRadioButton(type_frame, text="Nano BMC", variable=self.bmc_type, value=2).pack(side="left")
 
+
     def create_bmc_operations_section(self):
         """Create the BMC operations section with optimized spacing"""
         section = ctk.CTkFrame(self.main_frame)
@@ -477,6 +654,7 @@ class PlatypusApp:
             ("Set BMC IP", self.set_bmc_ip),
             ("Power ON Host", self.power_on_host),
             ("Reboot BMC", self.reboot_bmc),
+            ("Virtual Media", self.mount_virtual_media),  # New button
             ("Factory Reset", self.factory_reset)
         ]
         
@@ -485,7 +663,6 @@ class PlatypusApp:
             ctk.CTkButton(op_frame, text=text, command=command, height=28).grid(row=row, column=col, padx=3, pady=3, sticky="ew")
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
-
 
     def create_flashing_operations_section(self):
         """Create the flashing operations section with optimized spacing"""
@@ -639,6 +816,94 @@ class PlatypusApp:
             else:
                 print(f"Error updating network interfaces: {e}")
 
+
+
+    def create_virtual_media_menu(self):
+        """Create a Virtual Media submenu window"""
+        vm_window = ctk.CTkToplevel(self.root)
+        vm_window.title("Virtual Media Operations")
+        vm_window.geometry("300x200")
+        vm_window.attributes("-topmost", True)
+        
+        # Center the window
+        vm_window.update_idletasks()
+        width = vm_window.winfo_width()
+        height = vm_window.winfo_height()
+        x = (vm_window.winfo_screenwidth() // 2) - (width // 2)
+        y = (vm_window.winfo_screenheight() // 2) - (height // 2)
+        vm_window.geometry(f'{width}x{height}+{x}+{y}')
+        
+        # Create buttons
+        ctk.CTkLabel(vm_window, text="Virtual Media Operations", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+        
+        ctk.CTkButton(vm_window, text="Mount ISO", 
+                    command=self.mount_virtual_media, 
+                    height=35).pack(fill="x", padx=20, pady=10)
+        
+        ctk.CTkButton(vm_window, text="Eject Media", 
+                    command=self.eject_virtual_media, 
+                    height=35).pack(fill="x", padx=20, pady=10)
+        
+        # Make the window modal
+        vm_window.grab_set()
+        vm_window.focus_set()
+
+    # Update the BMC Operations button handler to call this menu
+    def handle_virtual_media(self):
+        """Show virtual media operations menu"""
+        self.create_virtual_media_menu()
+
+    # Update the virtual media button in create_bmc_operations_section
+    # Replace the previous "Virtual Media" entry with this:
+    # ("Virtual Media", self.handle_virtual_media)
+    
+
+    def eject_virtual_media(self):
+        """Eject any mounted virtual media"""
+        required = {
+            "Username": self.username.get(),
+            "Password": self.password.get(),
+            "BMC IP": self.bmc_ip.get()
+        }
+        if self._run_operation(
+            self.run_eject_virtual_media,
+            required_fields=required,
+            error_msg="Please enter all required fields: Username, Password, and BMC IP"
+        ):
+            self.log_message("Starting Virtual Media ejection operation...")
+
+    def run_eject_virtual_media(self):
+        """Run Virtual Media ejection operation"""
+        try:
+            self.log_message("Ejecting virtual media...")
+            result = asyncio.run(bmc.eject_virtual_media(
+                self.username.get(),
+                self.password.get(),
+                self.bmc_ip.get(),
+                self.update_progress,
+                self.log_message
+            ))
+            
+            if result:
+                self.log_message("Virtual Media ejected successfully.")
+                
+                # Ask if user wants to stop the HTTP server
+                if messagebox.askyesno(
+                    "Stop HTTP Server", 
+                    "Do you want to stop any running HTTP server?\n\n"
+                    "This will free up port 80 if it's currently in use."
+                ):
+                    self.force_close_port_80()
+                    self.log_message("HTTP server stopped.")
+            else:
+                self.log_message("Failed to eject virtual media.")
+                
+        except Exception as e:
+            self.log_message(f"Error during virtual media ejection: {e}")
+        finally:
+            self.lock_buttons = False
+
     def log_message(self, message):
         """Add a message to the log box"""
         if hasattr(self, 'log_box') and self.log_box:
@@ -730,6 +995,82 @@ class PlatypusApp:
         return True
     
     # BMC OPERATIONS
+
+
+
+    def mount_virtual_media(self):
+        """Mount virtual media (ISO) via Redfish"""
+        required = {
+            "Username": self.username.get(),
+            "Password": self.password.get(),
+            "BMC IP": self.bmc_ip.get(),
+            "Host IP": self.your_ip.get()
+        }
+        if self._run_operation(
+            self.run_mount_virtual_media,
+            required_fields=required,
+            error_msg="Please enter all required fields: Username, Password, BMC IP, and Host IP"
+        ):
+            self.log_message("Starting Virtual Media mounting operation...")
+
+    def run_mount_virtual_media(self):
+        """Run Virtual Media mounting operation optimized for OpenBMC"""
+        try:
+            # First, clean up any existing servers
+            self.force_close_port_80()
+            
+            # Select ISO file
+            iso_file = FileSelectionHelper.select_file(
+                self.root, 
+                "Select ISO Image",
+                self.last_firmware_dir,
+                "ISO Images (*.iso) | *.iso"
+            )
+            
+            if not iso_file:
+                self.log_message("No ISO file selected. Operation aborted.")
+                self.lock_buttons = False
+                return
+                
+            # Update last used directory
+            self.last_firmware_dir = os.path.dirname(iso_file)
+            self.save_config()
+            
+            self.log_message(f"Selected ISO file: {iso_file}")
+            
+            # Use the OpenBMC-specific implementation
+            result = asyncio.run(bmc.mount_virtual_media_openbmc(
+                self.username.get(),
+                self.password.get(),
+                self.bmc_ip.get(),
+                iso_file,
+                self.your_ip.get(),
+                self.update_progress,
+                self.log_message
+            ))
+            
+            if result:
+                self.log_message("Virtual Media mounted successfully.")
+                
+                # Ask if user wants to keep the server running
+                if messagebox.askyesno(
+                    "Server Running", 
+                    "HTTP server is running to serve the ISO.\n\n"
+                    "Do you want to keep the server running?\n\n"
+                    "Note: You must keep the server running for the virtual media to remain accessible."
+                ):
+                    self.log_message("HTTP server will continue running in the background.")
+                    self.log_message("Remember to close the application properly when done.")
+                else:
+                    self.log_message("Stopping HTTP server. Virtual media may no longer be accessible.")
+                    self.force_close_port_80()
+            else:
+                self.log_message("Failed to mount virtual media.")
+                
+        except Exception as e:
+            self.log_message(f"Error during virtual media mount: {e}")
+        finally:
+            self.lock_buttons = False
     
     def update_bmc(self):
         """Update BMC firmware"""
