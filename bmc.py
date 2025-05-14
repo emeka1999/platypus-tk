@@ -431,9 +431,6 @@ async def reset_to_uboot(callback_output, serial_device):
         # For OpenBMC, we need to send specific commands to drop to U-Boot
         callback_output("Sending OpenBMC commands to reboot to U-Boot...")
         
-        # First try to get a root shell if we're already booted
-        ser.write(b"root\n")
-        await asyncio.sleep(1)
         
         # Send the reboot command
         command = "reboot\n"
@@ -442,7 +439,7 @@ async def reset_to_uboot(callback_output, serial_device):
         
         # Wait for U-Boot to start
         callback_output("Waiting for U-Boot to initialize...")
-        await asyncio.sleep(5)
+        await asyncio.sleep(2)
         
         # Look for the autoboot message and interrupt it
         callback_output("Monitoring for autoboot countdown and interrupting...")

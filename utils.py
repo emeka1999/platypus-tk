@@ -50,12 +50,12 @@ async def login(bmc_user, bmc_pass, serial_device, callback_output):
         # Send username
         callback_output("Sending username...")
         ser.write(user.encode("utf-8"))
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
         # Send password
         callback_output("Sending password...")
         ser.write(passw.encode("utf-8"))
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
         # Read response from the serial device
         response = ser.read(1024).decode("utf-8").strip()
@@ -79,7 +79,6 @@ async def login(bmc_user, bmc_pass, serial_device, callback_output):
         callback_output(f"Error during login: {e}")
         return "Login failed due to an unexpected error."
     
-
 def bmc_info(bmc_user, bmc_pass, bmc_ip, callback_out):
     try:
         redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)

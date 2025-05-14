@@ -54,12 +54,12 @@ async def set_ip(bmc_ip, callback_progress, callback_output, serial_device):
         # Send command to set IP
         command = f"ifconfig eth0 up {bmc_ip}\n"
         ser.write(command.encode('utf-8'))
-        await asyncio.sleep(4)
+        await asyncio.sleep(1.5)
         
         # Optional verification - try to check if command ran
         verify_cmd = "ifconfig eth0\n"
         ser.write(verify_cmd.encode('utf-8'))
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(1)
         verify_response = ser.read_all().decode('utf-8', errors='ignore')
         
         # Look for the IP or other success indicators in the response
