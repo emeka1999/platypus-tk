@@ -230,7 +230,7 @@ async def bmc_factory_reset(callback_output, serial_device):
     finally:
         ser.close()
 
-async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, callback_output):
+async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, callback_output, serial_device):
     """Flash the eMMC storage on the BMC."""
     port = 80
 
@@ -246,7 +246,8 @@ async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, call
         httpd = start_server(directory, port, callback_output)
         callback_progress(0.10)
 
-        ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=0.1)
+        # FIX: Use the passed serial_device parameter instead of hardcoded '/dev/ttyUSB0'
+        ser = serial.Serial(serial_device, 115200, timeout=0.1)
 
         # Setting IP Address (bootloader)
         callback_output("Setting IP Address (bootloader)...")
@@ -309,31 +310,95 @@ async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, call
             stop_server(httpd, callback_output)
         callback_progress(0)
 
-async def reset_uboot(callback_output):
-    """Resets the BMC to U-Boot using the serial connection."""
+async def reset_to_uboot(callback_output, serial_device):
+    """Resets the OpenBMC to U-Boot using the serial connection and emulates keyboard interaction."""
+    ser = None
     try:
         callback_output("Opening serial connection...")
-        ser = serial.Serial('/dev/ttyUSB0', baudrate=115200, timeout=1)
+        # FIX: Use the passed serial_device parameter instead of hardcoded serial_device
+        ser = serial.Serial(serial_device, baudrate=115200, timeout=1)
         ser.dtr = True
 
-        callback_output("Sending reset command to U-Boot...")
-        command = 'reset\n'
+        # First, attempt to interrupt any boot process by sending a few returns
+        callback_output("Attempting to interrupt boot process...")
+        for _ in range(3):
+            ser.write(b'\n')
+            await asyncio.sleep(0.5)
+        
+        # For OpenBMC, we need to send specific commands to drop to U-Boot
+        callback_output("Sending OpenBMC commands to reboot to U-Boot...")
+        
+        
+        # Send the reboot command
+        command = "reboot\n"
         ser.write(command.encode('utf-8'))
+        callback_output("Rebooting system...")
+        
+        # Wait for U-Boot to start
+        callback_output("Waiting for U-Boot to initialize...")
         await asyncio.sleep(2)
+        
+        # Look for the autoboot message and interrupt it
+        callback_output("Monitoring for autoboot countdown and interrupting...")
+        
+        # Set up a task to periodically send a key to interrupt autoboot
+        interrupt_count = 0
+        max_interrupts = 30  # Try for about 15 seconds (0.5s intervals)
+        autoboot_detected = False
+        
+        while interrupt_count < max_interrupts:
+            # Read any available data
+            if ser.in_waiting:
+                data = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
+                if "autoboot" in data.lower() or "Hit any key" in data:
+                    autoboot_detected = True
+                    callback_output("Autoboot detected! Sending interrupt key...")
+                    # Send a space to interrupt
+                    ser.write(b' ')
+                    await asyncio.sleep(0.1)
+                    # Also send Enter to ensure it's caught
+                    ser.write(b'\n')
+                    break
+            
+            # Even if not detected yet, periodically send interrupt keys
+            if interrupt_count % 4 == 0:  # Every ~2 seconds
+                ser.write(b' ')  # Send space
+                await asyncio.sleep(0.1)
+                ser.write(b'\n')  # Send enter
+            
+            await asyncio.sleep(0.5)
+            interrupt_count += 1
+        
+        if autoboot_detected:
+            callback_output("Successfully interrupted autoboot!")
+            
+            # Wait a moment to read any response
+            await asyncio.sleep(1)
+            response = ser.read(ser.in_waiting).decode('utf-8', errors='ignore')
+            if response:
+                callback_output(f"U-Boot response: {response.strip()}")
+            
+            # Set bootdelay to 15 seconds for future boots
+            callback_output("Setting bootdelay to 15 seconds for future boots...")
+            ser.write(b"setenv bootdelay 15\n")
+            await asyncio.sleep(0.5)
+            ser.write(b"saveenv\n")
+            await asyncio.sleep(1)
+            
+            callback_output("System is now at U-Boot prompt. You can interact with it via the serial console.")
+        else:
+            callback_output("Could not detect autoboot sequence. System may still be booting.")
+            callback_output("If needed, open the console and press a key when you see the autoboot countdown.")
 
-        # Read response
-        response = ser.read(1024).decode('utf-8').strip()
-        callback_output(f"Response: {response}")
-
-        ser.close()
-        callback_output("Reset to U-Boot completed.")
     except serial.SerialException as e:
         callback_output(f"Serial error: {e}")
     except Exception as e:
-        callback_output(f"Error during reset: {e}")
+        callback_output(f"Error during reset to U-Boot: {e}")
     finally:
-        if 'ser' in locals() and ser.is_open:
-            ser.close()
+        # Don't close the serial connection so that it can be used by the console
+        # Just report status
+        if ser and ser.is_open:
+            callback_output("Serial connection remains open for console interaction.")
 
 
 async def bios_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, callback_output):
