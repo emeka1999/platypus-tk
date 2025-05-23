@@ -947,91 +947,243 @@ class PlatypusApp:
         return len(devices) > 0
 
     def get_network_interfaces(self):
-        """Get a list of network interfaces with valid IP addresses"""
+        """Get a comprehensive list of all network interfaces with valid IP addresses"""
         ips = []
+        interface_info = {}
         
         try:
-            # Try to get interfaces using 'ip addr' command (Linux-specific)
+            # Method 1: Use 'ip addr show' command (most comprehensive)
             try:
-                result = subprocess.run(['ip', 'addr'], capture_output=True, text=True)
+                result = subprocess.run(['ip', 'addr', 'show'], capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
                     import re
-                    # Parse ip addr output to find interfaces and IPs
-                    for line in result.stdout.splitlines():
-                        # Look for inet lines with IP addresses
-                        match = re.search(r'inet (\d+\.\d+\.\d+\.\d+).*scope global', line)
-                        if match:
-                            ip = match.group(1)
-                            if ip != "127.0.0.1" and ip not in ips:
-                                ips.append(ip)
-            except:
-                pass
-                
-            # If no interfaces found yet, try the hostname method
-            if not ips:
-                import socket
-                hostname = socket.gethostname()
-                
-                # Get the primary IP
-                try:
-                    primary_ip = socket.gethostbyname(hostname)
-                    if primary_ip != "127.0.0.1" and primary_ip not in ips:
-                        ips.append(primary_ip)
-                except:
-                    pass
+                    current_interface = None
                     
-                # Get all interface IPs
-                try:
-                    hostname_ips = socket.gethostbyname_ex(hostname)[2]
-                    for ip in hostname_ips:
-                        if ip != "127.0.0.1" and ip not in ips:
-                            ips.append(ip)
-                except:
-                    pass
-                
-            # If still no interfaces found, add localhost as a fallback
+                    for line in result.stdout.splitlines():
+                        # Parse interface names
+                        interface_match = re.match(r'^\d+:\s+([^:@]+)[@:]?\s', line)
+                        if interface_match:
+                            current_interface = interface_match.group(1)
+                            continue
+                        
+                        # Parse IP addresses
+                        ip_match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)/\d+.*scope\s+global', line)
+                        if ip_match and current_interface:
+                            ip = ip_match.group(1)
+                            if ip not in ips and ip != "127.0.0.1":
+                                ips.append(ip)
+                                interface_info[ip] = current_interface
+                                self.log_message(f"Found IP: {ip} on interface {current_interface}")
+                    
+            except Exception as e:
+                self.log_message(f"ip addr command failed: {e}")
+            
+            # Method 2: Use 'ifconfig' command as backup
             if not ips:
-                ips.append("127.0.0.1")
+                try:
+                    result = subprocess.run(['ifconfig'], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        import re
+                        
+                        # Split by interface blocks
+                        interfaces = result.stdout.split('\n\n')
+                        
+                        for interface_block in interfaces:
+                            if not interface_block.strip():
+                                continue
+                                
+                            # Get interface name
+                            interface_name_match = re.match(r'^([^:\s]+)', interface_block)
+                            interface_name = interface_name_match.group(1) if interface_name_match else "unknown"
+                            
+                            # Find IP addresses
+                            ip_matches = re.findall(r'inet\s+(\d+\.\d+\.\d+\.\d+)', interface_block)
+                            
+                            for ip in ip_matches:
+                                if ip not in ips and ip != "127.0.0.1":
+                                    ips.append(ip)
+                                    interface_info[ip] = interface_name
+                                    self.log_message(f"Found IP: {ip} on interface {interface_name}")
+                                    
+                except Exception as e:
+                    self.log_message(f"ifconfig command failed: {e}")
+            
+            # Method 3: Use netifaces library if available
+            try:
+                import netifaces
+                
+                for interface in netifaces.interfaces():
+                    try:
+                        addrs = netifaces.ifaddresses(interface)
+                        if netifaces.AF_INET in addrs:
+                            for addr_info in addrs[netifaces.AF_INET]:
+                                ip = addr_info.get('addr')
+                                if ip and ip not in ips and ip != "127.0.0.1":
+                                    ips.append(ip)
+                                    interface_info[ip] = interface
+                                    self.log_message(f"Found IP: {ip} on interface {interface}")
+                    except Exception:
+                        continue
+                        
+            except ImportError:
+                pass  # netifaces not available
+            except Exception as e:
+                self.log_message(f"netifaces detection failed: {e}")
+            
+            # Method 4: Use psutil network interfaces
+            try:
+                import psutil
+                
+                net_if_addrs = psutil.net_if_addrs()
+                for interface_name, addr_list in net_if_addrs.items():
+                    for addr in addr_list:
+                        if addr.family == 2:  # AF_INET (IPv4)
+                            ip = addr.address
+                            if ip and ip not in ips and ip != "127.0.0.1":
+                                ips.append(ip)
+                                interface_info[ip] = interface_name
+                                self.log_message(f"Found IP: {ip} on interface {interface_name}")
+                                
+            except Exception as e:
+                self.log_message(f"psutil network detection failed: {e}")
+            
+            # Method 5: Parse /proc/net/fib_trie (Linux specific)
+            try:
+                with open('/proc/net/fib_trie', 'r') as f:
+                    content = f.read()
+                    import re
+                    
+                    # Find local IPs
+                    ip_matches = re.findall(r'/32 host LOCAL\n.*?(\d+\.\d+\.\d+\.\d+)', content, re.DOTALL)
+                    
+                    for ip in ip_matches:
+                        if ip and ip not in ips and ip != "127.0.0.1":
+                            ips.append(ip)
+                            interface_info[ip] = "system"
+                            self.log_message(f"Found IP: {ip} from /proc/net/fib_trie")
+                            
+            except Exception as e:
+                pass  # /proc/net/fib_trie might not be available
+            
+            # Method 6: Socket-based detection (fallback)
+            if not ips:
+                try:
+                    import socket
+                    
+                    # Get hostname IPs
+                    hostname = socket.gethostname()
+                    
+                    # Get primary IP by connecting to external address
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                            s.connect(("8.8.8.8", 80))  # Google DNS
+                            primary_ip = s.getsockname()[0]
+                            if primary_ip not in ips and primary_ip != "127.0.0.1":
+                                ips.append(primary_ip)
+                                interface_info[primary_ip] = "primary"
+                                self.log_message(f"Found primary IP: {primary_ip}")
+                    except:
+                        pass
+                    
+                    # Get all hostname IPs
+                    try:
+                        hostname_ips = socket.gethostbyname_ex(hostname)[2]
+                        for ip in hostname_ips:
+                            if ip not in ips and ip != "127.0.0.1":
+                                ips.append(ip)
+                                interface_info[ip] = "hostname"
+                                self.log_message(f"Found hostname IP: {ip}")
+                    except:
+                        pass
+                        
+                except Exception as e:
+                    self.log_message(f"Socket detection failed: {e}")
+            
+            # Remove any invalid IPs and sort
+            valid_ips = []
+            for ip in ips:
+                # Validate IP format
+                try:
+                    parts = ip.split('.')
+                    if len(parts) == 4 and all(0 <= int(part) <= 255 for part in parts):
+                        valid_ips.append(ip)
+                except:
+                    continue
+            
+            # Sort IPs: put private network ranges first, then public
+            def ip_sort_key(ip):
+                parts = [int(x) for x in ip.split('.')]
+                # Private ranges: 192.168.x.x, 10.x.x.x, 172.16-31.x.x
+                if parts[0] == 192 and parts[1] == 168:
+                    return (0, parts)  # 192.168.x.x first
+                elif parts[0] == 10:
+                    return (1, parts)  # 10.x.x.x second  
+                elif parts[0] == 172 and 16 <= parts[1] <= 31:
+                    return (2, parts)  # 172.16-31.x.x third
+                else:
+                    return (3, parts)  # Public IPs last
+            
+            valid_ips.sort(key=ip_sort_key)
+            
+            # Log summary
+            if valid_ips:
+                self.log_message(f"Total {len(valid_ips)} IP address(es) detected:")
+                for ip in valid_ips:
+                    interface = interface_info.get(ip, "unknown")
+                    self.log_message(f"  - {ip} ({interface})")
+            else:
+                self.log_message("No valid IP addresses found")
+                # Add localhost as absolute fallback
+                valid_ips = ["127.0.0.1"]
                 
         except Exception as e:
-            print(f"Error detecting network interfaces: {e}")
+            self.log_message(f"Error detecting network interfaces: {e}")
+            # Absolute fallback
+            valid_ips = ["127.0.0.1"]
         
-        return ips
+        return valid_ips
 
     def update_ip_dropdown(self):
-        """Update the IP address dropdown with available network interfaces"""
+        """Update the IP address dropdown with all available network interfaces"""
         try:
             if not hasattr(self, 'ip_dropdown'):
                 return
                 
-            # Get network interfaces
+            self.log_message("Refreshing network interface list...")
+            
+            # Get comprehensive list of network interfaces
             ips = self.get_network_interfaces()
             
-            # If no interfaces found, leave as is
+            # If no interfaces found, show error and keep current
             if not ips:
-                if hasattr(self, 'log_box') and self.log_box:
-                    self.log_message("No network interfaces with valid IP addresses found.")
+                self.log_message("❌ No network interfaces found")
                 return
                 
-            # Update the dropdown values with IPs
+            # Update the dropdown values with all detected IPs
             self.ip_dropdown.configure(values=ips)
             
-            # Get current IP
+            # Get current IP selection
             current_ip = self.your_ip.get()
             
-            # If we have a current IP, try to select it in the dropdown
-            if current_ip in ips:
+            # Set the IP selection intelligently
+            if current_ip and current_ip in ips:
+                # Keep current selection if it's still valid
                 self.ip_dropdown.set(current_ip)
-            # Otherwise set a default value
-            elif ips:
-                self.ip_dropdown.set(ips[0])
-                self.your_ip.set(ips[0])
-                
-        except Exception as e:
-            if hasattr(self, 'log_box') and self.log_box:
-                self.log_message(f"Error updating network interfaces: {e}")
+                self.log_message(f"✓ Kept current selection: {current_ip}")
             else:
-                print(f"Error updating network interfaces: {e}")
+                # Auto-select the best IP (first in sorted list)
+                if ips:
+                    best_ip = ips[0]  # First IP after sorting (private networks first)
+                    self.ip_dropdown.set(best_ip)
+                    self.your_ip.set(best_ip)
+                    self.log_message(f"✓ Auto-selected: {best_ip}")
+            
+            # Show summary in log
+            self.log_message(f"Host IP dropdown updated with {len(ips)} interface(s)")
+                    
+        except Exception as e:
+            self.log_message(f"❌ Error updating network interfaces: {e}")
+            # Don't crash - just keep whatever was there before
 
     def log_message(self, message):
         """Add a message to the log box"""
