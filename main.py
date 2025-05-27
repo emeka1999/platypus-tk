@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox
-import asyncio, glob, bmc, json, os, time, psutil, threading
+import asyncio, glob, bmc, json, os, time, psutil, threading, subprocess  # Added subprocess import
 from utils import *
 from network import *
 from functools import partial
@@ -24,23 +24,21 @@ class FileSelectionHelper:
             result = subprocess.run(
                 ['zenity', '--file-selection', f'--filename={last_dir}/', 
                  f'--title={title}'] + filter_param,
-                capture_output=True, text=True
-                # Removed timeout parameter
+                capture_output=True, text=True, timeout=10  # Added timeout
             )
             if result.returncode == 0:
                 file_path = result.stdout.strip()
-        except (subprocess.SubprocessError, FileNotFoundError):
+        except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError):
             # Try kdialog next
             try:
                 filter_str = 'All Files (*)' if not file_filter else file_filter
                 result = subprocess.run(
                     ['kdialog', '--getopenfilename', last_dir, filter_str],
-                    capture_output=True, text=True
-                    # Removed timeout parameter
+                    capture_output=True, text=True, timeout=10  # Added timeout
                 )
                 if result.returncode == 0:
                     file_path = result.stdout.strip()
-            except (subprocess.SubprocessError, FileNotFoundError):
+            except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError):
                 # Fall back to a simple CustomTkinter dialog
                 file_path = FileSelectionHelper._show_entry_dialog(
                     parent, title, last_dir, f"Enter the full path to {title.lower()}:"
@@ -58,22 +56,20 @@ class FileSelectionHelper:
             result = subprocess.run(
                 ['zenity', '--file-selection', '--directory', 
                  f'--filename={last_dir}/', f'--title={title}'],
-                capture_output=True, text=True
-                # Removed timeout parameter
+                capture_output=True, text=True, timeout=10  # Added timeout
             )
             if result.returncode == 0:
                 directory = result.stdout.strip()
-        except (subprocess.SubprocessError, FileNotFoundError):
+        except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError):
             # Try kdialog next
             try:
                 result = subprocess.run(
                     ['kdialog', '--getexistingdirectory', last_dir, title],
-                    capture_output=True, text=True
-                    # Removed timeout parameter
+                    capture_output=True, text=True, timeout=10  # Added timeout
                 )
                 if result.returncode == 0:
                     directory = result.stdout.strip()
-            except (subprocess.SubprocessError, FileNotFoundError):
+            except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError):
                 # Fall back to a simple CustomTkinter dialog
                 directory = FileSelectionHelper._show_entry_dialog(
                     parent, title, last_dir, "Enter the full path to directory:"
@@ -118,7 +114,6 @@ class FileSelectionHelper:
         dialog.grab_set()  # Make dialog modal
         dialog.wait_window()  # Wait for dialog to close
         
-        return result_path[0] if result_path else ""
 
 class FlashAllWindow(ctk.CTkToplevel):
     def __init__(self, parent, bmc_type, app_instance):
@@ -355,12 +350,87 @@ class PlatypusApp:
         
         # Do an initial refresh of networks
         self.update_ip_dropdown()
+
+        self.active_serial_connections = []
+        self.cleanup_timer = None
+        
+        # Schedule periodic cleanup
+        self.schedule_cleanup()
+
         
         # Bind close event
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
         # Schedule device refresh and auto-console opening after UI is fully loaded
         self.root.after(500, self.initialize_app)
+
+    def cleanup_zombie_processes(self):
+        """Clean up any zombie processes created by the application"""
+        try:
+            current_pid = os.getpid()
+            
+            for proc in psutil.process_iter(['pid', 'ppid', 'name', 'status']):
+                try:
+                    # Clean up child processes that are zombies
+                    if (proc.info['ppid'] == current_pid and 
+                        proc.info['status'] == psutil.STATUS_ZOMBIE):
+                        self.log_message(f"Cleaning up zombie process: {proc.info['pid']}")
+                        os.waitpid(proc.info['pid'], os.WNOHANG)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+                    pass
+                    
+        except Exception as e:
+            self.log_message(f"Error cleaning zombie processes: {e}")
+
+    def cleanup_serial_connections(self):
+        """Clean up any stale serial connections"""
+        try:
+            # Remove closed connections from tracking
+            self.active_serial_connections = [
+                conn for conn in self.active_serial_connections 
+                if hasattr(conn, 'is_open') and conn.is_open
+            ]
+            
+            # Log current active connections
+            if self.active_serial_connections:
+                self.log_message(f"Active serial connections: {len(self.active_serial_connections)}")
+                
+        except Exception as e:
+            self.log_message(f"Error cleaning serial connections: {e}")
+
+    def track_serial_connection(self, serial_conn):
+        """Track a serial connection for cleanup"""
+        if serial_conn not in self.active_serial_connections:
+            self.active_serial_connections.append(serial_conn)
+    
+
+
+
+    def schedule_cleanup(self):
+        """Schedule periodic resource cleanup"""
+        self.cleanup_resources()
+        # Schedule next cleanup in 5 minutes
+        self.cleanup_timer = self.root.after(300000, self.schedule_cleanup)
+    
+    def cleanup_resources(self):
+        """Clean up system resources periodically"""
+        try:
+            self.log_message("Performing periodic resource cleanup...")
+            
+            # Clean up zombie processes
+            self.cleanup_zombie_processes()
+            
+            # Clean up orphaned serial connections
+            self.cleanup_serial_connections()
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            self.log_message("Resource cleanup completed.")
+            
+        except Exception as e:
+            self.log_message(f"Warning: Error during resource cleanup: {e}")
         
     def initialize_app(self):
         """Initialize the app with device refresh and auto-open console"""
@@ -738,20 +808,37 @@ class PlatypusApp:
             print(f"Error saving configuration: {e}")
 
     def on_close(self):
-        """Handle application closing"""
-        # Disconnect console if connected
-        if hasattr(self, 'embedded_console'):
-            self.embedded_console.disconnect()
+        """Handle application closing with better cleanup"""
+        self.log_message("Application closing - performing cleanup...")
         
-        # Force close any servers before exiting
-        self.log_message("Closing application. Cleaning up servers...")
+        # Cancel cleanup timer
+        if self.cleanup_timer:
+            self.root.after_cancel(self.cleanup_timer)
+        
+        # Clean up all serial connections
+        for conn in self.active_serial_connections:
+            try:
+                if hasattr(conn, 'close') and hasattr(conn, 'is_open') and conn.is_open:
+                    conn.close()
+            except:
+                pass
+        
+        # Clean up processes
+        self.cleanup_minicom_processes()
         self.force_close_port_80()
+        self.cleanup_zombie_processes()
         
         # Save configuration
         self.save_config()
         
         # Destroy the main window
         self.root.destroy()
+        
+        # Force exit if needed
+        try:
+            os._exit(0)
+        except:
+            pass
 
     def create_connection_section(self):
         """Create the connection settings section with optimized spacing"""
@@ -1209,21 +1296,51 @@ class PlatypusApp:
         return True
 
     def open_minicom_console(self):
-        """Open a minicom console for the selected serial device"""
+        """Open a minicom console for the selected serial device with better process management"""
         if not self.serial_device.get():
             self.log_message("No serial device selected. Please select a device.")
             return
         try:
             self.log_message(f"Launching Minicom on {self.serial_device.get()}...")
+            
+            # Clean up any existing minicom processes first
+            self.cleanup_minicom_processes()
+            
             # Try terminator first (as requested)
             try:
-                import subprocess
-                subprocess.Popen(["terminator", "-e", f"minicom -D {self.serial_device.get()}"])
+                process = subprocess.Popen(
+                    ["terminator", "-e", f"minicom -D {self.serial_device.get()}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                self.log_message(f"Minicom launched successfully (PID: {process.pid})")
             except Exception:
                 # Fall back to xterm if terminator fails
-                subprocess.Popen(["xterm", "-e", f"minicom -D {self.serial_device.get()}"])
+                process = subprocess.Popen(
+                    ["xterm", "-e", f"minicom -D {self.serial_device.get()}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                self.log_message(f"Minicom launched in xterm (PID: {process.pid})")
+                
         except Exception as e:
             self.log_message(f"Error launching Minicom: {e}")
+
+    def cleanup_minicom_processes(self):
+        """Clean up any existing minicom processes"""
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                if proc.info['name'] == 'minicom':
+                    try:
+                        cmdline = ' '.join(proc.info['cmdline'] or [])
+                        if self.serial_device.get() in cmdline:
+                            self.log_message(f"Terminating existing minicom process: {proc.info['pid']}")
+                            proc.terminate()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+        except Exception as e:
+            self.log_message(f"Error cleaning minicom processes: {e}")
+    
 
     def cleanup_server_processes(self):
         """Clean up any running server processes (TFTP, HTTP, etc.)"""
@@ -1278,6 +1395,59 @@ class PlatypusApp:
         # Start thread for operation
         threading.Thread(target=operation_func, daemon=True).start()
         return True
+    
+
+    def force_close_port_80(self):
+        """
+        Force close any processes using port 80 with better error handling.
+        """
+        self.log_message("Forcibly closing any processes using port 80...")
+        try:
+            # Method 1: Use lsof command
+            try:
+                result = subprocess.run(
+                    ["lsof", "-i", ":80", "-t"], 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=10  # Add timeout
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    pids = result.stdout.strip().split('\n')
+                    for pid in pids:
+                        if pid and pid.isdigit():
+                            self.log_message(f"Killing process {pid} using port 80")
+                            try:
+                                subprocess.run(["kill", "-9", pid], timeout=5)
+                            except subprocess.TimeoutExpired:
+                                self.log_message(f"Timeout killing process {pid}")
+            except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+            
+            # Method 2: Use psutil with better error handling
+            try:
+                for proc in psutil.process_iter(['pid', 'name', 'connections']):
+                    try:
+                        connections = proc.info.get('connections', [])
+                        if connections:
+                            for conn in connections:
+                                if (hasattr(conn, 'laddr') and 
+                                    hasattr(conn.laddr, 'port') and 
+                                    conn.laddr.port == 80):
+                                    self.log_message(f"Killing process {proc.info['pid']} ({proc.info['name']}) using port 80")
+                                    psutil.Process(proc.info['pid']).kill()
+                                    break
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, 
+                            KeyError, AttributeError, TypeError):
+                        pass
+            except Exception as e:
+                self.log_message(f"Error using psutil method: {e}")
+                
+            self.log_message("Port 80 cleanup completed")
+        except Exception as e:
+            self.log_message(f"Error while closing port 80 processes: {e}")
+
+        # Give a brief pause to ensure processes are fully terminated
+        time.sleep(1)
     
     # BMC OPERATIONS
 
@@ -1990,12 +2160,7 @@ class PlatypusApp:
                 
                 if not real_user:
                     self.log_message("❌ Could not determine real user")
-                    messagebox.showinfo(
-                        "Firefox Launch Error",
-                        f"Could not determine user context.\n\n"
-                        f"Please open Firefox manually and navigate to:\n{bmc_url}\n\n"
-                        f"The URL has been copied to your clipboard."
-                    )
+
                     return False
                 
                 self.log_message(f"Real user: {real_user}")
@@ -2022,27 +2187,13 @@ class PlatypusApp:
                 self.log_message("❌ All Firefox launch methods failed")
                 
                 # Show helpful instructions
-                messagebox.showinfo(
-                    "Firefox Launch Failed",
-                    f"Could not launch Firefox automatically.\n\n"
-                    f"The lock files have been cleaned up.\n\n"
-                    f"Please try:\n"
-                    f"1. Wait 10 seconds and try again\n"
-                    f"2. Or manually run: firefox --new-window '{bmc_url}'\n"
-                    f"3. Or restart Firefox completely\n\n"
-                    f"The URL has been copied to your clipboard."
-                )
+
                 return False
                     
             except Exception as e:
                 self.log_message(f"❌ Error during Firefox launch: {e}")
                 
-                messagebox.showinfo(
-                    "Firefox Launch Error",
-                    f"Error: {e}\n\n"
-                    f"Please open Firefox manually and navigate to:\n{bmc_url}\n\n"
-                    f"The URL has been copied to your clipboard."
-                )
+
                 return False
         
         # Launch Firefox in background thread

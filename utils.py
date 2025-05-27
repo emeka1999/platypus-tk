@@ -2,20 +2,71 @@ import time
 import asyncio
 import serial
 import redfish
+import threading
+import weakref
+
+
+
+def register_serial_connection(ser):
+    """Register a serial connection for cleanup tracking"""
+    _serial_connections.add(ser)
+
+def cleanup_all_serial_connections():
+    """Clean up all registered serial connections"""
+    connections_cleaned = 0
+    for ser in list(_serial_connections):
+        try:
+            if hasattr(ser, 'is_open') and ser.is_open:
+                ser.close()
+                connections_cleaned += 1
+        except:
+            pass
+    return connections_cleaned
+
+
+
+
 
 
 def read_serial_data(ser, command, delay):
+    """Improved serial data reading with better error handling and resource management"""
     try:
+        # Register this connection for tracking
+        register_serial_connection(ser)
+        
+        # Clear input buffer before sending command
+        if hasattr(ser, 'reset_input_buffer'):
+            ser.reset_input_buffer()
+        
         time.sleep(delay)
         ser.write(command.encode('utf-8'))
         time.sleep(2)  
-        response = ser.read_all().decode('utf-8')
-        return response
+        
+        # Use read_all() with timeout handling
+        start_time = time.time()
+        response = b""
+        timeout = 10  # 10 second timeout
+        
+        while time.time() - start_time < timeout:
+            if ser.in_waiting:
+                chunk = ser.read(ser.in_waiting)
+                if chunk:
+                    response += chunk
+                else:
+                    break
+            time.sleep(0.1)
+        
+        return response.decode('utf-8', errors='ignore')
+        
+    except serial.SerialTimeoutException:
+        print("Serial timeout occurred")
+        return ""
+    except serial.SerialException as e:
+        print(f"Serial error in read_serial_data: {e}")
+        return ""
     except Exception as e:
         print(f"Error reading serial data: {e}")
         return ""
-    
-
     
 # Continuously grabs that status of a redfish task 
 async def monitor_task(redfish_client, task_url, callback_output, callback_progress):
@@ -78,6 +129,42 @@ async def login(bmc_user, bmc_pass, serial_device, callback_output):
     except Exception as e:
         callback_output(f"Error during login: {e}")
         return "Login failed due to an unexpected error."
+    
+def create_serial_connection(device, baudrate=115200, timeout=5):
+    """Create a serial connection with proper error handling and registration"""
+    try:
+        ser = serial.Serial(device, baudrate=baudrate, timeout=timeout)
+        ser.dtr = True
+        register_serial_connection(ser)
+        return ser
+    except serial.SerialException as e:
+        print(f"Failed to create serial connection to {device}: {e}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error creating serial connection: {e}")
+        return None
+
+# Context manager for serial connections
+class ManagedSerialConnection:
+    """Context manager for serial connections that ensures proper cleanup"""
+    
+    def __init__(self, device, baudrate=115200, timeout=5):
+        self.device = device
+        self.baudrate = baudrate
+        self.timeout = timeout
+        self.connection = None
+    
+    def __enter__(self):
+        self.connection = create_serial_connection(self.device, self.baudrate, self.timeout)
+        return self.connection
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.connection and hasattr(self.connection, 'is_open'):
+            try:
+                if self.connection.is_open:
+                    self.connection.close()
+            except:
+                pass
     
 def bmc_info(bmc_user, bmc_pass, bmc_ip, callback_out):
     try:
