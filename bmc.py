@@ -567,3 +567,33 @@ async def reset_to_uboot(callback_output, serial_device):
         # Just report status
         if ser and ser.is_open:
             callback_output("Serial connection remains open for console interaction.")
+
+
+async def reset_uboot(callback_output, serial_device):
+ 
+
+    """Resets the BMC to U-Boot using the serial connection."""
+    ser = None
+    try:
+        callback_output("Opening serial connection...")
+        ser = serial.Serial(serial_device, baudrate=115200, timeout=1)
+        ser.dtr = True
+
+        callback_output("Sending reset command to U-Boot...")
+        command = 'reset\n'
+        ser.write(command.encode('utf-8'))
+        await asyncio.sleep(2)
+
+        # Read response
+        response = ser.read(1024).decode('utf-8').strip()
+        callback_output(f"Response: {response}")
+
+        ser.close()
+        callback_output("Reset to U-Boot completed.")
+    except serial.SerialException as e:
+        callback_output(f"Serial error: {e}")
+    except Exception as e:
+        callback_output(f"Error during reset: {e}")
+    finally:
+        if 'ser' in locals() and ser.is_open:
+            ser.close()

@@ -6,6 +6,8 @@ import threading
 import weakref
 
 
+_serial_connections = set()
+
 
 def register_serial_connection(ser):
     """Register a serial connection for cleanup tracking"""

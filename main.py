@@ -7,6 +7,7 @@ from network import *
 from functools import partial
 from threading import Thread
 
+
 class FileSelectionHelper:
     """Helper class to standardize and simplify file/directory selection dialogs"""
     
@@ -15,33 +16,50 @@ class FileSelectionHelper:
         """Generic file selection with fallbacks for platform compatibility"""
         file_path = ""
         
-        # Try zenity first
+        # Try zenity first with proper file filter formatting
         try:
-            filter_param = []
+            filter_params = []
             if file_filter:
-                filter_param = ['--file-filter', file_filter]
+                # Convert our filter format to zenity format
+                # Example: "Binary files (*.bin) | *.bin" -> "*.bin"
+                if '|' in file_filter:
+                    zenity_filter = file_filter.split('|')[-1].strip()
+                else:
+                    zenity_filter = file_filter
+                filter_params = ['--file-filter', zenity_filter]
                 
             result = subprocess.run(
                 ['zenity', '--file-selection', f'--filename={last_dir}/', 
-                 f'--title={title}'] + filter_param,
-                capture_output=True, text=True, timeout=10  # Added timeout
+                 f'--title={title}'] + filter_params,
+                capture_output=True, text=True
             )
             if result.returncode == 0:
                 file_path = result.stdout.strip()
-        except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError):
-            # Try kdialog next
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # Try kdialog next with proper filter formatting
             try:
-                filter_str = 'All Files (*)' if not file_filter else file_filter
+                if file_filter:
+                    # Convert our filter to kdialog format
+                    if '|' in file_filter:
+                        # Extract the pattern part after |
+                        pattern = file_filter.split('|')[-1].strip()
+                        # KDialog expects format like "*.bin *.tar.gz"
+                        kdialog_filter = pattern
+                    else:
+                        kdialog_filter = file_filter
+                else:
+                    kdialog_filter = '*'
+                    
                 result = subprocess.run(
-                    ['kdialog', '--getopenfilename', last_dir, filter_str],
-                    capture_output=True, text=True, timeout=10  # Added timeout
+                    ['kdialog', '--getopenfilename', last_dir, kdialog_filter],
+                    capture_output=True, text=True
                 )
                 if result.returncode == 0:
                     file_path = result.stdout.strip()
-            except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError):
+            except (subprocess.SubprocessError, FileNotFoundError):
                 # Fall back to a simple CustomTkinter dialog
                 file_path = FileSelectionHelper._show_entry_dialog(
-                    parent, title, last_dir, f"Enter the full path to {title.lower()}:"
+                    parent, title, last_dir, f"Enter the full path to {title.lower()}:", file_filter
                 )
                 
         return file_path
@@ -51,25 +69,27 @@ class FileSelectionHelper:
         """Generic directory selection with fallbacks for platform compatibility"""
         directory = ""
         
-        # Try zenity first
+        # Try zenity first (removed timeout)
         try:
             result = subprocess.run(
                 ['zenity', '--file-selection', '--directory', 
                  f'--filename={last_dir}/', f'--title={title}'],
-                capture_output=True, text=True, timeout=10  # Added timeout
+                capture_output=True, text=True
+                # Removed timeout=10 to allow unlimited time for selection
             )
             if result.returncode == 0:
                 directory = result.stdout.strip()
-        except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError):
-            # Try kdialog next
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # Try kdialog next (removed timeout)
             try:
                 result = subprocess.run(
                     ['kdialog', '--getexistingdirectory', last_dir, title],
-                    capture_output=True, text=True, timeout=10  # Added timeout
+                    capture_output=True, text=True
+                    # Removed timeout=10 to allow unlimited time for selection
                 )
                 if result.returncode == 0:
                     directory = result.stdout.strip()
-            except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError):
+            except (subprocess.SubprocessError, FileNotFoundError):
                 # Fall back to a simple CustomTkinter dialog
                 directory = FileSelectionHelper._show_entry_dialog(
                     parent, title, last_dir, "Enter the full path to directory:"
@@ -78,28 +98,89 @@ class FileSelectionHelper:
         return directory
         
     @staticmethod
-    def _show_entry_dialog(parent, title, default_value, message):
-        """Helper method to show a simple input dialog"""
+    def _show_entry_dialog(parent, title, default_value, message, file_filter=None):
+        """Helper method to show a simple input dialog with better UX"""
         dialog = ctk.CTkToplevel(parent)
         dialog.title(title)
-        dialog.geometry("500x150")
+        dialog.geometry("600x200")  # Made slightly larger
         dialog.attributes('-topmost', True)
         
+        # Make dialog resizable
+        dialog.resizable(True, True)
+        
         path_var = ctk.StringVar(value=default_value)
-        ctk.CTkLabel(dialog, text=message).pack(pady=10)
-        ctk.CTkEntry(dialog, textvariable=path_var, width=400).pack(pady=10)
+        
+        # Add some padding and better layout
+        main_frame = ctk.CTkFrame(dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Show file filter info if provided
+        if file_filter:
+            filter_info = f"{message}\n\nExpected file type: {file_filter}"
+        else:
+            filter_info = message
+            
+        ctk.CTkLabel(main_frame, text=filter_info, wraplength=500).pack(pady=10)
+        
+        # Entry with better visibility
+        entry = ctk.CTkEntry(main_frame, textvariable=path_var, width=500, height=32)
+        entry.pack(pady=10, fill="x")
+        entry.focus_set()  # Focus on the entry field
+        
+        # Add browse button for convenience
+        browse_frame = ctk.CTkFrame(main_frame)
+        browse_frame.pack(fill="x", pady=5)
+        
+        def browse_for_path():
+            """Allow user to browse instead of typing path"""
+            try:
+                if "directory" in message.lower():
+                    # Use a simple directory browser
+                    result = subprocess.run(
+                        ['zenity', '--file-selection', '--directory', f'--title=Browse for {title}'],
+                        capture_output=True, text=True
+                    )
+                    if result.returncode == 0:
+                        path_var.set(result.stdout.strip())
+                else:
+                    # Use a simple file browser with filter if available
+                    cmd = ['zenity', '--file-selection', f'--title=Browse for {title}']
+                    if file_filter and '|' in file_filter:
+                        pattern = file_filter.split('|')[-1].strip()
+                        cmd.extend(['--file-filter', pattern])
+                    
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    if result.returncode == 0:
+                        path_var.set(result.stdout.strip())
+            except:
+                pass  # Ignore if zenity not available
+        
+        ctk.CTkButton(browse_frame, text="Browse...", command=browse_for_path, width=100).pack(side="right")
         
         result_path = []  # Use a list to store the result
         
         def on_ok():
-            result_path.append(path_var.get())
-            dialog.destroy()
+            path = path_var.get().strip()
+            if path and (os.path.exists(path) or "Enter the full path" in message):
+                result_path.append(path)
+                dialog.destroy()
+            else:
+                # Show error message
+                error_label = ctk.CTkLabel(main_frame, text="⚠️ Path does not exist!", text_color="red")
+                error_label.pack(pady=5)
+                dialog.after(3000, error_label.destroy)  # Remove error after 3 seconds
         
         def on_cancel():
             dialog.destroy()
         
-        button_frame = ctk.CTkFrame(dialog)
-        button_frame.pack(fill="x", padx=20, pady=10)
+        # Handle Enter key
+        def on_enter(event):
+            on_ok()
+        
+        entry.bind('<Return>', on_enter)
+        
+        button_frame = ctk.CTkFrame(main_frame)
+        button_frame.pack(fill="x", pady=10)
         ctk.CTkButton(button_frame, text="OK", command=on_ok, width=100).pack(side="left", padx=20)
         ctk.CTkButton(button_frame, text="Cancel", command=on_cancel, width=100).pack(side="right", padx=20)
         
@@ -114,6 +195,7 @@ class FileSelectionHelper:
         dialog.grab_set()  # Make dialog modal
         dialog.wait_window()  # Wait for dialog to close
         
+        return result_path[0] if result_path else ""
 
 class FlashAllWindow(ctk.CTkToplevel):
     def __init__(self, parent, bmc_type, app_instance):
@@ -227,7 +309,7 @@ class FlashAllWindow(ctk.CTkToplevel):
                 app.save_config()
     
     def select_fip_file(self):
-        """Select FIP file for flashing U-Boot"""
+        """Select FIP file for flashing U-Boot with validation"""
         # Start with last selected FIP file directory or fall back to general FIP dir
         last_dir = os.path.dirname(self.fip_file.get()) if self.fip_file.get() else None
         if not last_dir:
@@ -236,10 +318,29 @@ class FlashAllWindow(ctk.CTkToplevel):
         file_path = FileSelectionHelper.select_file(
             self, "Select FIP File", 
             last_dir,
-            "Binary files (*.bin) | *.bin"
+            "FIP Binary files (fip-snuc-*.bin) | fip-snuc-*.bin"
         )
         
         if file_path:
+            # Validate filename before accepting
+            filename = os.path.basename(file_path)
+            allowed_fip_files = {"fip-snuc-nanobmc.bin", "fip-snuc-mos-bmc.bin"}
+            
+            if filename not in allowed_fip_files:
+                self.log_message(f"❌ Invalid FIP file: '{filename}'")
+                self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
+                
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Invalid FIP File", 
+                    f"Invalid FIP file selected: '{filename}'\n\n"
+                    f"Only these files are allowed:\n"
+                    f"• fip-snuc-nanobmc.bin\n"
+                    f"• fip-snuc-mos-bmc.bin\n\n"
+                    f"Please select the correct FIP file."
+                )
+                return  # Don't set the file path
+            
             self.fip_file.set(file_path)
             # Save to both specific and general file paths
             self.app_instance.last_flash_all_fip = file_path
@@ -248,6 +349,49 @@ class FlashAllWindow(ctk.CTkToplevel):
             # Save the configuration if method exists
             if hasattr(app, 'save_config'):
                 app.save_config()
+            
+            self.log_message(f"✓ Valid FIP file selected: {filename}")
+
+    def select_eeprom_file(self):
+        """Select EEPROM file for flashing FRU with validation"""
+        # Start with last selected EEPROM file directory or fall back to general EEPROM dir
+        last_dir = os.path.dirname(self.eeprom_file.get()) if self.eeprom_file.get() else None
+        if not last_dir:
+            last_dir = app.last_eeprom_dir if hasattr(app, 'last_eeprom_dir') else os.path.expanduser("~")
+        
+        file_path = FileSelectionHelper.select_file(
+            self, "Select EEPROM (FRU) File", 
+            last_dir,
+            "FRU Binary files (fru.bin) | fru.bin"
+        )
+        
+        if file_path:
+            # Validate filename before accepting
+            filename = os.path.basename(file_path)
+            
+            if filename != "fru.bin":
+                self.log_message(f"❌ Invalid EEPROM file: '{filename}'")
+                self.log_message(f"Required file: 'fru.bin'")
+                
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Invalid EEPROM File", 
+                    f"Invalid EEPROM file selected: '{filename}'\n\n"
+                    f"Only 'fru.bin' files are allowed for EEPROM flashing.\n\n"
+                    f"Please select the correct fru.bin file."
+                )
+                return  # Don't set the file path
+            
+            self.eeprom_file.set(file_path)
+            # Save to both specific and general file paths
+            self.app_instance.last_flash_all_eeprom = file_path
+            if hasattr(app, 'last_eeprom_dir'):
+                app.last_eeprom_dir = os.path.dirname(file_path)
+            # Save the configuration if method exists
+            if hasattr(app, 'save_config'):
+                app.save_config()
+            
+            self.log_message(f"✓ Valid EEPROM file selected: {filename}")
     
     def select_eeprom_file(self):
         """Select EEPROM file for flashing FRU"""
@@ -974,7 +1118,6 @@ class PlatypusApp:
         ops = [
             ("Flash FIP (U-Boot)", self.flash_u_boot),
             ("Flash eMMC", self.flash_emmc),
-            ("Reset BMC", self.reset_bmc),
             ("Flash FRU (EEPROM)", self.flash_eeprom),
             ("Flash All", self.on_flash_all),
             ("Reboot to Bootloader", self.reboot_to_bootloader)
@@ -1471,12 +1614,12 @@ class PlatypusApp:
     def run_update_bmc(self):
         """Run BMC update operation"""
         try:
-            # Select firmware file
+            # Select firmware file with specific filter
             self.flash_file = FileSelectionHelper.select_file(
                 self.root, 
                 "Select BMC Firmware",
                 self.last_firmware_dir,
-                "Tar GZ Files (*.tar.gz)"
+                "BMC Firmware (*.tar.gz) | *.tar.gz"
             )
             
             if not self.flash_file:
@@ -1650,47 +1793,65 @@ class PlatypusApp:
             self.log_message("Starting U-Boot flashing operation...")
 
     def run_flash_u_boot(self):
-        """Run flash U-Boot operation"""
-        try:
-            # Select FIP file
-            file_path = FileSelectionHelper.select_file(
-                self.root,
-                "Select FIP File", 
-                self.last_fip_dir,
-                "Binary files (*.bin) | *.bin"
-            )
-            
-            if not file_path:
-                self.log_message("No file selected. Flashing aborted.")
+            """Run flash U-Boot operation with strict filename validation"""
+            try:
+                # Select FIP file with specific filter
+                file_path = FileSelectionHelper.select_file(
+                    self.root,
+                    "Select FIP File", 
+                    self.last_fip_dir,
+                    "FIP files (fip-snuc-*.bin) | fip-snuc-*.bin"
+                )
+                
+                if not file_path:
+                    self.log_message("No file selected. Flashing aborted.")
+                    self.lock_buttons = False
+                    return
+                
+                # Validate filename - STRICT validation for FIP files
+                filename = os.path.basename(file_path)
+                allowed_fip_files = {"fip-snuc-nanobmc.bin", "fip-snuc-mos-bmc.bin"}
+                
+                if filename not in allowed_fip_files:
+                    self.log_message(f"❌ ERROR: Invalid FIP file selected!")
+                    self.log_message(f"Selected file: '{filename}'")
+                    self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
+                    self.log_message("⚠️  FIP flashing ABORTED for safety!")
+                    
+                    # Show error dialog to user
+                    from tkinter import messagebox
+                    messagebox.showerror(
+                        "Invalid FIP File", 
+                        f"Invalid FIP file selected: '{filename}'\n\n"
+                        f"Only these files are allowed:\n"
+                        f"• fip-snuc-nanobmc.bin\n"
+                        f"• fip-snuc-mos-bmc.bin\n\n"
+                        f"Please select the correct FIP file and try again."
+                    )
+                    
+                    self.lock_buttons = False
+                    return
+                    
+                # Update last used directory
+                self.last_fip_dir = os.path.dirname(file_path)
+                self.save_config()
+                
+                self.flash_file = file_path
+                self.log_message(f"✓ Valid FIP file selected: {filename}")
+                self.log_message(f"File path: {file_path}")
+                
+                # Run the flashing process
+                asyncio.run(bmc.flasher(
+                    self.flash_file, 
+                    self.your_ip.get(), 
+                    self.update_progress, 
+                    self.log_message, 
+                    self.serial_device.get()
+                ))
+            except Exception as e:
+                self.log_message(f"Error during FIP flashing: {e}")
+            finally:
                 self.lock_buttons = False
-                return
-                
-            # Update last used directory
-            self.last_fip_dir = os.path.dirname(file_path)
-            self.save_config()
-                
-            # Validate filename (optional)
-            allowed_files = {"fip-snuc-nanobmc.bin", "fip-snuc-mos-bmc.bin"}
-            filename = os.path.basename(file_path)
-            if filename not in allowed_files:
-                self.log_message(f"Warning: Selected file '{filename}' does not match expected filenames. "
-                                 f"Expected: {' or '.join(allowed_files)}. Continuing anyway...")
-            
-            self.flash_file = file_path
-            self.log_message(f"Selected FIP file: {file_path}")
-            
-            # Run the flashing process
-            asyncio.run(bmc.flasher(
-                self.flash_file, 
-                self.your_ip.get(), 
-                self.update_progress, 
-                self.log_message, 
-                self.serial_device.get()
-            ))
-        except Exception as e:
-            self.log_message(f"Error during FIP flashing: {e}")
-        finally:
-            self.lock_buttons = False
 
 
     def flash_emmc(self):
@@ -1794,18 +1955,39 @@ class PlatypusApp:
             self.log_message("Starting EEPROM flashing operation...")
 
     def run_flash_eeprom(self):
-        """Run flash EEPROM operation"""
+        """Run flash EEPROM operation with strict filename validation"""
         try:
-            # Select EEPROM file
+            # Select EEPROM file with specific filter
             file_path = FileSelectionHelper.select_file(
                 self.root,
-                "Select EEPROM File", 
+                "Select EEPROM (FRU) File", 
                 self.last_eeprom_dir,
-                "Binary files (*.bin) | *.bin"
+                "FRU files (fru.bin) | fru.bin"
             )
             
             if not file_path:
                 self.log_message("No file selected for EEPROM flashing. Process aborted.")
+                self.lock_buttons = False
+                return
+            
+            # Validate filename - STRICT validation for EEPROM files
+            filename = os.path.basename(file_path)
+            
+            if filename != "fru.bin":
+                self.log_message(f"❌ ERROR: Invalid EEPROM file selected!")
+                self.log_message(f"Selected file: '{filename}'")
+                self.log_message(f"Required file: 'fru.bin'")
+                self.log_message("⚠️  EEPROM flashing ABORTED for safety!")
+                
+                # Show error dialog to user
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Invalid EEPROM File", 
+                    f"Invalid EEPROM file selected: '{filename}'\n\n"
+                    f"Only 'fru.bin' files are allowed for EEPROM flashing.\n\n"
+                    f"Please select the correct fru.bin file and try again."
+                )
+                
                 self.lock_buttons = False
                 return
                 
@@ -1814,7 +1996,8 @@ class PlatypusApp:
             self.save_config()
             
             self.flash_file = file_path
-            self.log_message(f"Starting EEPROM flashing with file: {self.flash_file}")
+            self.log_message(f"✓ Valid EEPROM file selected: {filename}")
+            self.log_message(f"File path: {file_path}")
             
             # Run the flashing process
             asyncio.run(bmc.flash_eeprom(
@@ -1861,12 +2044,12 @@ class PlatypusApp:
     def run_update_bios(self):
         """Run BIOS update operation"""
         try:
-            # Select firmware file
+            # Select firmware file with specific filter
             self.flash_file = FileSelectionHelper.select_file(
                 self.root, 
                 "Select BIOS Firmware",
                 self.last_firmware_dir,
-                "BIOS Firmware Files (*.tar.gz)"
+                "BIOS Firmware (*.tar.gz) | *.tar.gz"
             )
             
             if not self.flash_file:
