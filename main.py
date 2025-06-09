@@ -7,6 +7,12 @@ from network import *
 from functools import partial
 from threading import Thread
 
+try:
+    from extra import create_multi_unit_window
+    MULTI_UNIT_AVAILABLE = True
+except ImportError:
+    MULTI_UNIT_AVAILABLE = False
+    print("Multi-unit functionality not available (extra.py not found)")
 
 class FileSelectionHelper:
     """Helper class to standardize and simplify file/directory selection dialogs"""
@@ -1107,7 +1113,7 @@ class PlatypusApp:
 
     def create_flashing_operations_section(self):
         """Create the flashing operations section with optimized spacing"""
-        section = ctk.CTkFrame(self.controls_frame)  # Changed from self.main_frame to self.controls_frame
+        section = ctk.CTkFrame(self.controls_frame)
         section.pack(fill="x", pady=5)
         
         ctk.CTkLabel(section, text="Flashing Operations", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
@@ -1115,17 +1121,25 @@ class PlatypusApp:
         op_frame = ctk.CTkFrame(section)
         op_frame.pack(fill="x", padx=10)
         
+        # Standard operations - UPDATED to include Multi-Unit Flash
         ops = [
             ("Flash FIP (U-Boot)", self.flash_u_boot),
             ("Flash eMMC", self.flash_emmc),
             ("Flash FRU (EEPROM)", self.flash_eeprom),
             ("Flash All", self.on_flash_all),
+            ("Multi-Unit Flash", self.open_multi_unit_flash),  # NEW BUTTON
             ("Reboot to Bootloader", self.reboot_to_bootloader)
         ]
         
         for i, (text, command) in enumerate(ops):
             row, col = divmod(i, 3)
-            ctk.CTkButton(op_frame, text=text, command=command, height=28).grid(row=row, column=col, padx=3, pady=3, sticky="ew")
+            button = ctk.CTkButton(op_frame, text=text, command=command, height=28)
+            button.grid(row=row, column=col, padx=3, pady=3, sticky="ew")
+            
+            # Special styling for Multi-Unit Flash button
+            if text == "Multi-Unit Flash":
+                button.configure(fg_color="#2B5CE6", hover_color="#1E3A8A", 
+                            text_color="white", font=ctk.CTkFont(weight="bold"))
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
 
@@ -1153,6 +1167,35 @@ class PlatypusApp:
         self.progress = ctk.CTkProgressBar(progress_frame)
         self.progress.pack(side="left", expand=True, fill="x", padx=5)
         self.progress.set(0)
+
+    def open_multi_unit_flash(self):
+        """Open the multi-unit flash window (NanoBMC only)"""
+        if not MULTI_UNIT_AVAILABLE:
+            messagebox.showerror("Feature Not Available", 
+                            "Multi-unit flashing is not available.\n\n"
+                            "Please ensure 'extra.py' is in the same directory as main.py")
+            return
+        
+        # Check if NanoBMC is selected
+        if self.bmc_type.get() != 2:
+            response = messagebox.askyesno("BMC Type", 
+                                        "Multi-unit flashing is only available for NanoBMC devices.\n\n"
+                                        "Would you like to switch to NanoBMC mode?")
+            if response:
+                self.bmc_type.set(2)
+                self.log_message("Switched to NanoBMC mode for multi-unit flashing")
+            else:
+                return
+        
+        try:
+            # Create and show the multi-unit window
+            multi_window = create_multi_unit_window(self.root, self)
+            if multi_window:
+                self.log_message("Multi-unit flash window opened")
+                self.log_message("TIP: Make sure all devices are at U-Boot bootloader prompt before starting")
+        except Exception as e:
+            self.log_message(f"Error opening multi-unit flash window: {e}")
+            messagebox.showerror("Error", f"Failed to open multi-unit flash window:\n{e}")
 
 
     def refresh_devices(self):
