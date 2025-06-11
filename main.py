@@ -581,43 +581,34 @@ class PlatypusApp:
             
         except Exception as e:
             self.log_message(f"Warning: Error during resource cleanup: {e}")
-        
+            
     def initialize_app(self):
-        """Initialize the app with device refresh and auto-open console"""
+        """Initialize the app with device refresh"""
         # First refresh devices
         self.log_message("Initializing application...")
         
         # Update device list
         devices_found = self.refresh_devices()
         
-        # Now try to auto-open the console if we found any devices
+        # Just log the status without auto-opening console
         if devices_found:
-            self.log_message("Found serial devices - auto-opening console...")
-            # Give a small delay for UI to update
-            self.root.after(500, self.open_minicom_console)
+            self.log_message("Serial devices detected. Use 'Console' button to open when needed.")
         else:
-            self.log_message("No serial devices found. Please connect a device.")
-            # Optionally show a message to the user
-            from tkinter import messagebox
-            messagebox.showinfo(
-                "No Serial Devices",
-                "No serial devices were detected. Please connect a device and click 'Refresh'."
-            )
-
-            
-    def auto_open_console(self):
-        """Automatically open console if a serial device is available"""
-        if self.serial_device.get():
-            self.log_message("Auto-opening console...")
-            self.open_minicom_console()
-        else:
-            self.log_message("No serial device selected. Console not auto-opened.")
-            # Optionally, show a message to the user
-            from tkinter import messagebox
-            messagebox.showinfo(
-                "Console Not Opened",
-                "No serial device detected. Please select a device and click 'Console' to open."
-            )
+            self.log_message("No serial devices found. Please connect a device and click 'Refresh'.")
+                
+        def auto_open_console(self):
+            """Automatically open console if a serial device is available"""
+            if self.serial_device.get():
+                self.log_message("Auto-opening console...")
+                self.open_minicom_console()
+            else:
+                self.log_message("No serial device selected. Console not auto-opened.")
+                # Optionally, show a message to the user
+                from tkinter import messagebox
+                messagebox.showinfo(
+                    "Console Not Opened",
+                    "No serial device detected. Please select a device and click 'Console' to open."
+                )
 
 
     def on_window_resize(self, event):

@@ -6,15 +6,18 @@ import threading
 import weakref
 
 
+# Global set to track serial connections - initialized properly
 _serial_connections = set()
 
 
 def register_serial_connection(ser):
     """Register a serial connection for cleanup tracking"""
+    global _serial_connections
     _serial_connections.add(ser)
 
 def cleanup_all_serial_connections():
     """Clean up all registered serial connections"""
+    global _serial_connections
     connections_cleaned = 0
     for ser in list(_serial_connections):
         try:
@@ -23,15 +26,14 @@ def cleanup_all_serial_connections():
                 connections_cleaned += 1
         except:
             pass
+    _serial_connections.clear()  # Clear the set after cleanup
     return connections_cleaned
-
-
-
-
 
 
 def read_serial_data(ser, command, delay):
     """Improved serial data reading with better error handling and resource management"""
+    global _serial_connections
+    
     try:
         # Register this connection for tracking
         register_serial_connection(ser)
