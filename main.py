@@ -7,6 +7,12 @@ from network import *
 from functools import partial
 from threading import Thread
 
+try:
+    from extra import create_multi_unit_window
+    MULTI_UNIT_AVAILABLE = True
+except ImportError:
+    MULTI_UNIT_AVAILABLE = False
+    print("Multi-unit functionality not available (extra.py not found)")
 
 class FileSelectionHelper:
     """Helper class to standardize and simplify file/directory selection dialogs"""
@@ -575,43 +581,34 @@ class PlatypusApp:
             
         except Exception as e:
             self.log_message(f"Warning: Error during resource cleanup: {e}")
-        
+            
     def initialize_app(self):
-        """Initialize the app with device refresh and auto-open console"""
+        """Initialize the app with device refresh"""
         # First refresh devices
         self.log_message("Initializing application...")
         
         # Update device list
         devices_found = self.refresh_devices()
         
-        # Now try to auto-open the console if we found any devices
+        # Just log the status without auto-opening console
         if devices_found:
-            self.log_message("Found serial devices - auto-opening console...")
-            # Give a small delay for UI to update
-            self.root.after(500, self.open_minicom_console)
+            self.log_message("Serial devices detected. Use 'Console' button to open when needed.")
         else:
-            self.log_message("No serial devices found. Please connect a device.")
-            # Optionally show a message to the user
-            from tkinter import messagebox
-            messagebox.showinfo(
-                "No Serial Devices",
-                "No serial devices were detected. Please connect a device and click 'Refresh'."
-            )
-
-            
-    def auto_open_console(self):
-        """Automatically open console if a serial device is available"""
-        if self.serial_device.get():
-            self.log_message("Auto-opening console...")
-            self.open_minicom_console()
-        else:
-            self.log_message("No serial device selected. Console not auto-opened.")
-            # Optionally, show a message to the user
-            from tkinter import messagebox
-            messagebox.showinfo(
-                "Console Not Opened",
-                "No serial device detected. Please select a device and click 'Console' to open."
-            )
+            self.log_message("No serial devices found. Please connect a device and click 'Refresh'.")
+                
+        def auto_open_console(self):
+            """Automatically open console if a serial device is available"""
+            if self.serial_device.get():
+                self.log_message("Auto-opening console...")
+                self.open_minicom_console()
+            else:
+                self.log_message("No serial device selected. Console not auto-opened.")
+                # Optionally, show a message to the user
+                from tkinter import messagebox
+                messagebox.showinfo(
+                    "Console Not Opened",
+                    "No serial device detected. Please select a device and click 'Console' to open."
+                )
 
 
     def on_window_resize(self, event):
@@ -1107,7 +1104,7 @@ class PlatypusApp:
 
     def create_flashing_operations_section(self):
         """Create the flashing operations section with optimized spacing"""
-        section = ctk.CTkFrame(self.controls_frame)  # Changed from self.main_frame to self.controls_frame
+        section = ctk.CTkFrame(self.controls_frame)
         section.pack(fill="x", pady=5)
         
         ctk.CTkLabel(section, text="Flashing Operations", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
@@ -1115,17 +1112,25 @@ class PlatypusApp:
         op_frame = ctk.CTkFrame(section)
         op_frame.pack(fill="x", padx=10)
         
+        # Standard operations - UPDATED to include Multi-Unit Flash
         ops = [
             ("Flash FIP (U-Boot)", self.flash_u_boot),
             ("Flash eMMC", self.flash_emmc),
             ("Flash FRU (EEPROM)", self.flash_eeprom),
             ("Flash All", self.on_flash_all),
+            ("Multi-Unit Flash", self.open_multi_unit_flash),  # NEW BUTTON
             ("Reboot to Bootloader", self.reboot_to_bootloader)
         ]
         
         for i, (text, command) in enumerate(ops):
             row, col = divmod(i, 3)
-            ctk.CTkButton(op_frame, text=text, command=command, height=28).grid(row=row, column=col, padx=3, pady=3, sticky="ew")
+            button = ctk.CTkButton(op_frame, text=text, command=command, height=28)
+            button.grid(row=row, column=col, padx=3, pady=3, sticky="ew")
+            
+            # Special styling for Multi-Unit Flash button
+            if text == "Multi-Unit Flash":
+                button.configure(fg_color="#2B5CE6", hover_color="#1E3A8A", 
+                            text_color="white", font=ctk.CTkFont(weight="bold"))
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
 
@@ -1153,6 +1158,45 @@ class PlatypusApp:
         self.progress = ctk.CTkProgressBar(progress_frame)
         self.progress.pack(side="left", expand=True, fill="x", padx=5)
         self.progress.set(0)
+
+    def open_multi_unit_flash(self):
+        """Open the multi-unit flash window (NanoBMC only)"""
+        if not MULTI_UNIT_AVAILABLE:
+            messagebox.showerror("Feature Not Available", 
+                            "Multi-unit flashing is not available.\n\n"
+                            "Please ensure 'extra.py' is in the same directory as main.py")
+            return
+        
+        # Check if NanoBMC is selected
+        if self.bmc_type.get() != 2:
+            response = messagebox.askyesno("BMC Type", 
+                                        "Multi-unit flashing is only available for NanoBMC devices.\n\n"
+                                        "Would you like to switch to NanoBMC mode?")
+            if response:
+                self.bmc_type.set(2)
+                self.log_message("Switched to NanoBMC mode for multi-unit flashing")
+            else:
+                return
+        
+        # Clean up any existing serial connections before opening multi-unit
+        try:
+            connections_cleaned = cleanup_all_serial_connections()
+            if connections_cleaned > 0:
+                self.log_message(f"Detached {connections_cleaned} serial connections for multi-unit mode")
+            else:
+                self.log_message("No active serial connections to detach")
+        except Exception as e:
+            self.log_message(f"Error detaching serial connections: {e}")
+        
+        try:
+            # Create and show the multi-unit window
+            multi_window = create_multi_unit_window(self.root, self)
+            if multi_window:
+                self.log_message("Multi-unit flash window opened")
+                self.log_message("TIP: Make sure all devices are at U-Boot bootloader prompt before starting")
+        except Exception as e:
+            self.log_message(f"Error opening multi-unit flash window: {e}")
+            messagebox.showerror("Error", f"Failed to open multi-unit flash window:\n{e}")
 
 
     def refresh_devices(self):
