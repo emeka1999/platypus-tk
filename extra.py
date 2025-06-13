@@ -46,7 +46,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         self.parent = parent
         self.app_instance = app_instance
         self.title("Multi-Unit NanoBMC Flash Manager")
-        self.geometry("700x800")
+        self.geometry("920x900")
         
         # Check BMC type
         if hasattr(app_instance, 'bmc_type') and app_instance.bmc_type.get() != 2:
@@ -132,8 +132,8 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         ctk.CTkButton(header, text="Refresh", command=self.refresh_devices, width=80).pack(side="right", padx=5)
         ctk.CTkButton(header, text="Add Unit", command=self.add_unit, width=80).pack(side="right")
         
-        # Units container
-        self.units_container = ctk.CTkScrollableFrame(frame, height=200)
+        # Units container - INCREASED HEIGHT
+        self.units_container = ctk.CTkScrollableFrame(frame, height=300)  # Changed from 200 to 300
         self.units_container.pack(fill="both", expand=True, padx=10, pady=5)
 
     def _create_control_section(self, parent):
@@ -149,8 +149,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                                          height=35, width=140)
         self.start_button.pack(side="left", padx=5)
         
-        ctk.CTkButton(button_frame, text="Stop All", command=self.stop_all, 
-                     height=35, width=100).pack(side="left", padx=5)
         
         ctk.CTkButton(button_frame, text="Multi-Console", command=self.open_console,
                      height=35, width=120).pack(side="left", padx=5)
@@ -196,6 +194,8 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             # Update configs from UI before saving
             for unit in self.units:
                 unit['config'].device = unit['device_var'].get()
+                unit['config'].username = unit['username_var'].get()
+                unit['config'].password = unit['password_var'].get()
                 unit['config'].bmc_ip = unit['bmc_ip_var'].get()
                 unit['config'].host_ip = unit['host_ip_var'].get()
             
@@ -325,37 +325,45 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         labels_frame = ctk.CTkFrame(unit_frame)
         labels_frame.pack(fill="x", padx=5, pady=(0,2))
         
-        ctk.CTkLabel(labels_frame, text="Device", width=100, font=ctk.CTkFont(size=10)).grid(row=0, column=0, padx=2, pady=1)
-        ctk.CTkLabel(labels_frame, text="BMC IP", width=100, font=ctk.CTkFont(size=10)).grid(row=0, column=1, padx=2, pady=1)
-        ctk.CTkLabel(labels_frame, text="Host IP", width=100, font=ctk.CTkFont(size=10)).grid(row=0, column=2, padx=2, pady=1)
-        ctk.CTkLabel(labels_frame, text="Progress", width=200, font=ctk.CTkFont(size=10)).grid(row=0, column=3, padx=5, pady=1)
-        ctk.CTkLabel(labels_frame, text="Status", width=80, font=ctk.CTkFont(size=10)).grid(row=0, column=4, padx=2, pady=1)
+        ctk.CTkLabel(labels_frame, text="Device", width=120, font=ctk.CTkFont(size=10)).grid(row=0, column=0, padx=2, pady=1)
+        ctk.CTkLabel(labels_frame, text="Username", width=120, font=ctk.CTkFont(size=10)).grid(row=0, column=1, padx=2, pady=1)
+        ctk.CTkLabel(labels_frame, text="Password", width=120, font=ctk.CTkFont(size=10)).grid(row=0, column=2, padx=2, pady=1)
+        ctk.CTkLabel(labels_frame, text="BMC IP", width=80, font=ctk.CTkFont(size=10)).grid(row=0, column=3, padx=2, pady=1)
+        ctk.CTkLabel(labels_frame, text="Host IP", width=80, font=ctk.CTkFont(size=10)).grid(row=0, column=4, padx=2, pady=1)
+        ctk.CTkLabel(labels_frame, text="Progress", width=120, font=ctk.CTkFont(size=10)).grid(row=0, column=5, padx=2, pady=1)
+        ctk.CTkLabel(labels_frame, text="Status", width=120, font=ctk.CTkFont(size=10)).grid(row=0, column=6, padx=2, pady=1)
         
         # Config fields
         fields = ctk.CTkFrame(unit_frame)
-        fields.pack(fill="x", padx=5, pady=2)
+        fields.pack(fill="x", padx=15, pady=2)
         
         # Device
         device_var = ctk.StringVar(value=config.device)
-        device_dropdown = ctk.CTkComboBox(fields, variable=device_var, values=self.available_devices, width=100)
-        device_dropdown.grid(row=0, column=0, padx=2, pady=1)
+        device_dropdown = ctk.CTkComboBox(fields, variable=device_var, values=self.available_devices, width=120)
+        device_dropdown.grid(row=0, column=0, padx=8, pady=1)
+        
+        # Username and Password
+        username_var = ctk.StringVar(value=config.username)
+        password_var = ctk.StringVar(value=config.password)
+        ctk.CTkEntry(fields, textvariable=username_var, placeholder_text="Username", width=120).grid(row=0, column=1, padx=2, pady=1)
+        ctk.CTkEntry(fields, textvariable=password_var, placeholder_text="Password", show="*", width=80).grid(row=0, column=2, padx=2, pady=1)
         
         # IPs
         bmc_ip_var = ctk.StringVar(value=config.bmc_ip)
         host_ip_var = ctk.StringVar(value=config.host_ip)
-        ctk.CTkEntry(fields, textvariable=bmc_ip_var, placeholder_text="BMC IP", width=100).grid(row=0, column=1, padx=2, pady=1)
+        ctk.CTkEntry(fields, textvariable=bmc_ip_var, placeholder_text="BMC IP", width=80).grid(row=0, column=3, padx=8, pady=1)
         
         # Host IP dropdown with network interfaces
-        host_ip_dropdown = ctk.CTkComboBox(fields, variable=host_ip_var, values=self.get_network_interfaces(), width=100)
-        host_ip_dropdown.grid(row=0, column=2, padx=2, pady=1)
+        host_ip_dropdown = ctk.CTkComboBox(fields, variable=host_ip_var, values=self.get_network_interfaces(), width=120)
+        host_ip_dropdown.grid(row=0, column=4, padx=2, pady=1)
         
         # Progress
-        progress_bar = ctk.CTkProgressBar(fields, width=200)
-        progress_bar.grid(row=0, column=3, padx=5, pady=1)
+        progress_bar = ctk.CTkProgressBar(fields, width=120)
+        progress_bar.grid(row=0, column=5, padx=2, pady=1)
         progress_bar.set(0)
         
-        status_label = ctk.CTkLabel(fields, text="Ready", width=80)
-        status_label.grid(row=0, column=4, padx=2, pady=1)
+        status_label = ctk.CTkLabel(fields, text="Ready", width=60)
+        status_label.grid(row=0, column=6, padx=2, pady=1)
         
         # Store unit data
         unit = {
@@ -363,6 +371,8 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             'frame': unit_frame,
             'config': config,
             'device_var': device_var,
+            'username_var': username_var,
+            'password_var': password_var,
             'bmc_ip_var': bmc_ip_var,
             'host_ip_var': host_ip_var,
             'device_dropdown': device_dropdown,
@@ -614,26 +624,42 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         config = unit['config']
         shared_server = None
         
+        # Update config with current UI values BEFORE starting
+        config.device = unit['device_var'].get()
+        config.username = unit['username_var'].get()
+        config.password = unit['password_var'].get()
+        config.bmc_ip = unit['bmc_ip_var'].get()
+        config.host_ip = unit['host_ip_var'].get()
+        
         def update_progress(progress):
-            self.unit_progress[unit_id] = progress
-            unit['progress_bar'].set(progress)
+            if self.operation_running:  # Only update if still running
+                self.unit_progress[unit_id] = progress
+                unit['progress_bar'].set(progress)
         
         def update_status(status):
-            unit['status_label'].configure(text=status)
+            if self.operation_running:  # Only update if still running
+                unit['status_label'].configure(text=status)
         
         def unit_log(msg):
             self.log(f"[Unit {unit_id}] {msg}")
         
         try:
             if not self.operation_running:
+                unit_log("Operation cancelled before start")
                 return
+            
+            # Log the config values for debugging
+            unit_log(f"Using config - Device: {config.device}, Username: {config.username}, BMC IP: {config.bmc_ip}")
             
             # Get shared server for this unit's host IP
             shared_server = self.get_shared_server(config.host_ip, self.firmware_folder.get())
             if not shared_server:
                 raise Exception("Failed to get shared server")
-                
+            
             # Step 1: Flash eMMC using shared server
+            if not self.operation_running:
+                return
+                
             update_status("Flash eMMC")
             unit_log("Starting eMMC flash")
             
@@ -647,12 +673,21 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             ))
             
             if not result or not self.operation_running:
-                raise Exception("eMMC flash failed")
+                if not self.operation_running:
+                    unit_log("Operation cancelled during eMMC flash")
+                else:
+                    raise Exception("eMMC flash failed")
+                return
             
             # Step 2: Login
+            if not self.operation_running:
+                return
+                
             update_status("Login")
-            unit_log("Logging in")
-            asyncio.run(self.login(config, unit_log))
+            unit_log(f"Logging in with username: {config.username}")
+            result = asyncio.run(self.login(config, unit_log))  # Changed from await to asyncio.run
+            if not self.operation_running:
+                return
             update_progress(0.4)
             
             # Step 3: Set IP
@@ -706,8 +741,11 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 unit_log("✅ Flash completed successfully")
             
         except Exception as e:
-            update_status("Failed")
-            unit_log(f"❌ Error: {e}")
+            if self.operation_running:
+                update_status("Failed")
+                unit_log(f"❌ Error: {e}")
+            else:
+                unit_log("Operation cancelled")
             update_progress(0)
         finally:
             # Release the shared server
@@ -894,11 +932,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         finally:
             if ser and ser.is_open:
                 ser.close()
-        """Login to BMC"""
-        from utils import login
-        result = await login(config.username, config.password, config.device, log_func)
-        if "successful" not in result.lower():
-            log_func("Login may have failed, continuing...")
+ 
 
     def monitor_progress(self):
         """Monitor overall progress"""
@@ -1310,10 +1344,9 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             self.log(f"Error cleaning console processes: {e}")
 
     def generate_terminator_config(self, units):
-        """Generate terminator config optimized for screen size"""
+        """Generate terminator config optimized for screen size with device and IP labels"""
         config = """[global_config]
-    window_state = maximise
-    borderless = True
+    borderless = false
     [keybindings]
     [profiles]
     [[default]]
@@ -1322,11 +1355,15 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         cursor_color = "#aaaaaa"
     """
         
-        # Add profiles for each unit with smaller font
+        # Add profiles for each unit with device and IP info
         for unit in units:
             device = unit['device_var'].get()
             unit_id = unit['id']
             bmc_ip = unit['bmc_ip_var'].get() or "No IP"
+            
+            # Create a descriptive title
+            device_name = device.split('/')[-1] if device else "No Device"  # Extract ttyUSB0 from /dev/ttyUSB0
+            title = f"Unit{unit_id}-{device_name}-{bmc_ip}"
             
             config += f"""  [[unit_{unit_id}]]
         custom_command = minicom -D {device}
@@ -1345,14 +1382,21 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         
         if num_units == 1:
             unit = units[0]
+            device = unit['device_var'].get()
+            bmc_ip = unit['bmc_ip_var'].get() or "No IP"
+            device_name = device.split('/')[-1] if device else "No Device"
+            title = f"Unit{unit['id']}-{device_name}-{bmc_ip}"
+            
             config += f"""    [[[child1]]]
         parent = window0
         profile = unit_{unit['id']}
         type = Terminal
+        title = {title}
         [[[window0]]]
         parent = ""
         type = Window
         size = 1200, 800
+        title = NanoBMC Multi-Console
     """
         elif num_units == 2:
             # Side by side for 2 units
@@ -1364,14 +1408,17 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         parent = child1
         profile = unit_{units[0]['id']}
         type = Terminal
+        title = Unit{units[0]['id']}-{units[0]['device_var'].get().split('/')[-1] if units[0]['device_var'].get() else 'NoDevice'}-{units[0]['bmc_ip_var'].get() or 'NoIP'}
         [[[terminal2]]]
         parent = child1
         profile = unit_{units[1]['id']}
         type = Terminal
+        title = Unit{units[1]['id']}-{units[1]['device_var'].get().split('/')[-1] if units[1]['device_var'].get() else 'NoDevice'}-{units[1]['bmc_ip_var'].get() or 'NoIP'}
         [[[window0]]]
         parent = ""
         type = Window
         size = 1400, 800
+        title = NanoBMC Multi-Console
     """
         elif num_units == 3:
             # Top 2, bottom 1
@@ -1387,18 +1434,22 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         parent = child2
         profile = unit_{units[0]['id']}
         type = Terminal
+        title = Unit{units[0]['id']}-{units[0]['device_var'].get().split('/')[-1] if units[0]['device_var'].get() else 'NoDevice'}-{units[0]['bmc_ip_var'].get() or 'NoIP'}
         [[[terminal2]]]
         parent = child2
         profile = unit_{units[1]['id']}
         type = Terminal
+        title = Unit{units[1]['id']}-{units[1]['device_var'].get().split('/')[-1] if units[1]['device_var'].get() else 'NoDevice'}-{units[1]['bmc_ip_var'].get() or 'NoIP'}
         [[[terminal3]]]
         parent = child1
         profile = unit_{units[2]['id']}
         type = Terminal
+        title = Unit{units[2]['id']}-{units[2]['device_var'].get().split('/')[-1] if units[2]['device_var'].get() else 'NoDevice'}-{units[2]['bmc_ip_var'].get() or 'NoIP'}
         [[[window0]]]
         parent = ""
         type = Window
         size = 1600, 1000
+        title = NanoBMC Multi-Console
     """
         elif num_units == 4:
             # 2x2 grid
@@ -1418,22 +1469,27 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         parent = child2
         profile = unit_{units[0]['id']}
         type = Terminal
+        title = Unit{units[0]['id']}-{units[0]['device_var'].get().split('/')[-1] if units[0]['device_var'].get() else 'NoDevice'}-{units[0]['bmc_ip_var'].get() or 'NoIP'}
         [[[terminal2]]]
         parent = child2
         profile = unit_{units[1]['id']}
         type = Terminal
+        title = Unit{units[1]['id']}-{units[1]['device_var'].get().split('/')[-1] if units[1]['device_var'].get() else 'NoDevice'}-{units[1]['bmc_ip_var'].get() or 'NoIP'}
         [[[terminal3]]]
         parent = child3
         profile = unit_{units[2]['id']}
         type = Terminal
+        title = Unit{units[2]['id']}-{units[2]['device_var'].get().split('/')[-1] if units[2]['device_var'].get() else 'NoDevice'}-{units[2]['bmc_ip_var'].get() or 'NoIP'}
         [[[terminal4]]]
         parent = child3
         profile = unit_{units[3]['id']}
         type = Terminal
+        title = Unit{units[3]['id']}-{units[3]['device_var'].get().split('/')[-1] if units[3]['device_var'].get() else 'NoDevice'}-{units[3]['bmc_ip_var'].get() or 'NoIP'}
         [[[window0]]]
         parent = ""
         type = Window
         size = 1600, 1200
+        title = NanoBMC Multi-Console
     """
         else:
             # For more than 4, use individual windows instead
@@ -1490,8 +1546,9 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         """Login to BMC"""
         from utils import login
         result = await login(config.username, config.password, config.device, log_func)
-        if "successful" not in result.lower():
+        if result and "successful" not in result.lower():
             log_func("Login may have failed, continuing...")
+        return result
 
 
 def create_multi_unit_window(parent, app_instance):

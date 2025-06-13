@@ -246,7 +246,6 @@ async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, call
         httpd = start_server(directory, port, callback_output)
         callback_progress(0.10)
 
-        # FIX: Use the passed serial_device parameter instead of hardcoded '/dev/ttyUSB0'
         ser = serial.Serial(serial_device, 115200, timeout=0.1)
 
         # Setting IP Address (bootloader)

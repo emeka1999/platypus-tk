@@ -983,7 +983,7 @@ class PlatypusApp:
 
     def create_connection_section(self):
         """Create the connection settings section with optimized spacing"""
-        section = ctk.CTkFrame(self.controls_frame)  # Changed from self.main_frame to self.controls_frame
+        section = ctk.CTkFrame(self.controls_frame)
         section.pack(fill="x", pady=5)
         
         ctk.CTkLabel(section, text="Connection Settings", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
@@ -1016,7 +1016,13 @@ class PlatypusApp:
         ip_frame.pack(fill="x", padx=10, pady=2)
         
         ctk.CTkLabel(ip_frame, text="BMC IP:").grid(row=0, column=0, padx=5, pady=2, sticky="e")
-        ctk.CTkEntry(ip_frame, textvariable=self.bmc_ip, height=28).grid(row=0, column=1, padx=5, pady=2, sticky="ew")
+        
+        # Create a frame for BMC IP entry and grab button
+        bmc_ip_frame = ctk.CTkFrame(ip_frame)
+        bmc_ip_frame.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
+        
+        ctk.CTkEntry(bmc_ip_frame, textvariable=self.bmc_ip, height=28).pack(side="left", expand=True, fill="x")
+       
         
         ctk.CTkLabel(ip_frame, text="Host IP:").grid(row=1, column=0, padx=5, pady=2, sticky="e")
         
@@ -1158,6 +1164,8 @@ class PlatypusApp:
         self.progress = ctk.CTkProgressBar(progress_frame)
         self.progress.pack(side="left", expand=True, fill="x", padx=5)
         self.progress.set(0)
+
+    
 
     def open_multi_unit_flash(self):
         """Open the multi-unit flash window (NanoBMC only)"""
