@@ -50,7 +50,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         
         # Check BMC type
         if hasattr(app_instance, 'bmc_type') and app_instance.bmc_type.get() != 2:
-            messagebox.showerror("Error", "Multi-unit flashing only for NanoBMC!")
+            messagebox.showerror("Error", "Multi-unit flashing only for NanoBMC!", parent=self)
             self.destroy()
             return
         
@@ -69,6 +69,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         self.firmware_folder = ctk.StringVar()
         self.fip_file = ctk.StringVar()
         self.eeprom_file = ctk.StringVar()
+        self.enable_eeprom = ctk.BooleanVar(value=True)
         
         # Config file
         self.config_file = os.path.expanduser("~/.nanobmc_multiflash_config.json")
@@ -118,7 +119,32 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         
         file_row("Firmware Folder:", self.firmware_folder, self.select_firmware_folder)
         file_row("FIP File:", self.fip_file, self.select_fip_file)
-        file_row("EEPROM File:", self.eeprom_file, self.select_eeprom_file)
+        
+        # Special row for EEPROM with checkbox
+        eeprom_row = ctk.CTkFrame(frame)
+        eeprom_row.pack(fill="x", padx=10, pady=2)
+        
+        self.eeprom_checkbox = ctk.CTkCheckBox(eeprom_row, text="Flash EEPROM:", 
+                                             variable=self.enable_eeprom, 
+                                             width=120,
+                                             command=self.toggle_eeprom_state)
+        self.eeprom_checkbox.pack(side="left")
+        
+        self.eeprom_entry = ctk.CTkEntry(eeprom_row, textvariable=self.eeprom_file)
+        self.eeprom_entry.pack(side="left", fill="x", expand=True, padx=5)
+        
+        self.eeprom_browse_btn = ctk.CTkButton(eeprom_row, text="Browse", 
+                                             command=self.select_eeprom_file, width=70)
+        self.eeprom_browse_btn.pack(side="right")
+        
+        # Initialize state
+        self.toggle_eeprom_state()
+
+    def toggle_eeprom_state(self):
+        """Enable/disable EEPROM UI elements based on checkbox"""
+        state = "normal" if self.enable_eeprom.get() else "disabled"
+        self.eeprom_entry.configure(state=state)
+        self.eeprom_browse_btn.configure(state=state)
 
     def _create_unit_section(self, parent):
         """Create unit management section"""
@@ -133,7 +159,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         ctk.CTkButton(header, text="Add Unit", command=self.add_unit, width=80).pack(side="right")
         
         # Units container - INCREASED HEIGHT
-        self.units_container = ctk.CTkScrollableFrame(frame, height=300)  # Changed from 200 to 300
+        self.units_container = ctk.CTkScrollableFrame(frame, height=300)
         self.units_container.pack(fill="both", expand=True, padx=10, pady=5)
 
     def _create_control_section(self, parent):
@@ -149,6 +175,8 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                                          height=35, width=140)
         self.start_button.pack(side="left", padx=5)
         
+        ctk.CTkButton(button_frame, text="Save Config", command=self.save_config,
+                     height=35, width=120).pack(side="left", padx=5)
         
         ctk.CTkButton(button_frame, text="Multi-Console", command=self.open_console,
                      height=35, width=120).pack(side="left", padx=5)
@@ -169,6 +197,23 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         self.log_text = ctk.CTkTextbox(frame, height=120)
         self.log_text.pack(fill="both", expand=True, padx=10, pady=5)
 
+    def log(self, message):
+        """Thread-safe logging"""
+        timestamp = time.strftime("%H:%M:%S")
+        formatted = f"[{timestamp}] {message}\n"
+        # Use after() to schedule the update on the main thread
+        self.after(0, self._log_internal, formatted)
+        
+        # Log to main app safely
+        if hasattr(self.app_instance, 'log_message'):
+            self.after(0, self.app_instance.log_message, f"[Multi] {message}")
+
+    def _log_internal(self, formatted_message):
+        """Internal method to update log widget, must run on main thread"""
+        if hasattr(self, 'log_text'):
+            self.log_text.insert(tk.END, formatted_message)
+            self.log_text.see(tk.END)
+
     def load_config(self):
         """Load configuration from file"""
         try:
@@ -179,6 +224,8 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 self.firmware_folder.set(config.get('firmware_folder', ''))
                 self.fip_file.set(config.get('fip_file', ''))
                 self.eeprom_file.set(config.get('eeprom_file', ''))
+                self.enable_eeprom.set(config.get('enable_eeprom', True))
+                self.toggle_eeprom_state()
                 
                 # Load units
                 for unit_data in config.get('units', []):
@@ -203,6 +250,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 'firmware_folder': self.firmware_folder.get(),
                 'fip_file': self.fip_file.get(),
                 'eeprom_file': self.eeprom_file.get(),
+                'enable_eeprom': self.enable_eeprom.get(),
                 'units': [
                     {
                         'device': unit['config'].device,
@@ -240,7 +288,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                                                    "FIP files (fip-snuc-nanobmc.bin) | fip-snuc-nanobmc.bin")
         if file_path:
             if os.path.basename(file_path) != "fip-snuc-nanobmc.bin":
-                messagebox.showerror("Invalid File", "Must select 'fip-snuc-nanobmc.bin'")
+                messagebox.showerror("Invalid File", "Must select 'fip-snuc-nanobmc.bin'", parent=self)
                 return
             self.fip_file.set(file_path)
             self.save_config()
@@ -253,7 +301,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                                                    "FRU files (fru.bin) | fru.bin")
         if file_path:
             if os.path.basename(file_path) != "fru.bin":
-                messagebox.showerror("Invalid File", "Must select 'fru.bin'")
+                messagebox.showerror("Invalid File", "Must select 'fru.bin'", parent=self)
                 return
             self.eeprom_file.set(file_path)
             self.save_config()
@@ -269,11 +317,9 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
     def get_network_interfaces(self):
         """Get list of network interfaces (copied from main.py)"""
-        # Import the method from main app
         if hasattr(self.app_instance, 'get_network_interfaces'):
             return self.app_instance.get_network_interfaces()
         else:
-            # Fallback to simple detection
             try:
                 import subprocess
                 result = subprocess.run(['ip', 'addr', 'show'], capture_output=True, text=True, timeout=5)
@@ -293,12 +339,17 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
     def add_unit(self, unit_data=None):
         """Add new unit configuration"""
+        # Limit to 3 units
+        if len(self.units) >= 3:
+            if unit_data is None:  # Only show warning for manual user action
+                messagebox.showwarning("Limit Reached", "Maximum of 3 units allowed.", parent=self)
+            return
+
         unit_id = len(self.units) + 1
         
         unit_frame = ctk.CTkFrame(self.units_container)
         unit_frame.pack(fill="x", pady=3)
         
-        # Create config
         config = UnitConfig()
         if unit_data:
             config.device = unit_data.get('device', '')
@@ -306,14 +357,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             config.password = unit_data.get('password', '')
             config.bmc_ip = unit_data.get('bmc_ip', '')
             config.host_ip = unit_data.get('host_ip', '')
-        else:
-            # Leave everything empty for user to fill
-            config.username = ''
-            config.password = ''
-            config.bmc_ip = ''
-            config.host_ip = ''
         
-        # Create UI elements
         header = ctk.CTkFrame(unit_frame)
         header.pack(fill="x", padx=5, pady=2)
         
@@ -321,7 +365,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         ctk.CTkButton(header, text="Remove", command=lambda: self.remove_unit(unit_id-1), 
                     width=60, height=25).pack(side="right")
         
-        # Labels row
         labels_frame = ctk.CTkFrame(unit_frame)
         labels_frame.pack(fill="x", padx=5, pady=(0,2))
         
@@ -333,31 +376,25 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         ctk.CTkLabel(labels_frame, text="Progress", width=120, font=ctk.CTkFont(size=10)).grid(row=0, column=5, padx=2, pady=1)
         ctk.CTkLabel(labels_frame, text="Status", width=120, font=ctk.CTkFont(size=10)).grid(row=0, column=6, padx=2, pady=1)
         
-        # Config fields
         fields = ctk.CTkFrame(unit_frame)
         fields.pack(fill="x", padx=15, pady=2)
         
-        # Device
         device_var = ctk.StringVar(value=config.device)
         device_dropdown = ctk.CTkComboBox(fields, variable=device_var, values=self.available_devices, width=120)
         device_dropdown.grid(row=0, column=0, padx=8, pady=1)
         
-        # Username and Password
         username_var = ctk.StringVar(value=config.username)
         password_var = ctk.StringVar(value=config.password)
         ctk.CTkEntry(fields, textvariable=username_var, placeholder_text="Username", width=120).grid(row=0, column=1, padx=2, pady=1)
         ctk.CTkEntry(fields, textvariable=password_var, placeholder_text="Password", show="*", width=80).grid(row=0, column=2, padx=2, pady=1)
         
-        # IPs
         bmc_ip_var = ctk.StringVar(value=config.bmc_ip)
         host_ip_var = ctk.StringVar(value=config.host_ip)
         ctk.CTkEntry(fields, textvariable=bmc_ip_var, placeholder_text="BMC IP", width=80).grid(row=0, column=3, padx=8, pady=1)
         
-        # Host IP dropdown with network interfaces
         host_ip_dropdown = ctk.CTkComboBox(fields, variable=host_ip_var, values=self.get_network_interfaces(), width=120)
         host_ip_dropdown.grid(row=0, column=4, padx=2, pady=1)
         
-        # Progress
         progress_bar = ctk.CTkProgressBar(fields, width=120)
         progress_bar.grid(row=0, column=5, padx=2, pady=1)
         progress_bar.set(0)
@@ -365,7 +402,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         status_label = ctk.CTkLabel(fields, text="Ready", width=60)
         status_label.grid(row=0, column=6, padx=2, pady=1)
         
-        # Store unit data
         unit = {
             'id': unit_id,
             'frame': unit_frame,
@@ -384,38 +420,31 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         self.units.append(unit)
         self.unit_progress[unit_id] = 0
         
-        # Auto-save
         if not unit_data:
             self.save_config()
 
     def remove_unit(self, index):
         """Remove unit configuration and renumber remaining units"""
         if 0 <= index < len(self.units):
-            # Remove the unit
             self.units[index]['frame'].destroy()
             removed_unit_id = self.units[index]['id']
             self.units.pop(index)
             
-            # Remove from progress tracking
             if removed_unit_id in self.unit_progress:
                 del self.unit_progress[removed_unit_id]
             
-            # Renumber all remaining units and update their UI
             for i, unit in enumerate(self.units):
                 new_id = i + 1
                 old_id = unit['id']
                 unit['id'] = new_id
                 
-                # Update the unit label in the UI
-                header_frame = unit['frame'].winfo_children()[0]  # First child is the header
-                label = header_frame.winfo_children()[0]  # First child of header is the label
+                header_frame = unit['frame'].winfo_children()[0]
+                label = header_frame.winfo_children()[0]
                 label.configure(text=f"Unit {new_id}")
                 
-                # Update the remove button command
-                remove_button = header_frame.winfo_children()[1]  # Second child is remove button
+                remove_button = header_frame.winfo_children()[1]
                 remove_button.configure(command=lambda idx=i: self.remove_unit(idx))
                 
-                # Update progress tracking
                 if old_id in self.unit_progress:
                     self.unit_progress[new_id] = self.unit_progress[old_id]
                     if old_id != new_id:
@@ -428,14 +457,12 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         """Get or create a shared HTTP server for the host IP"""
         with self.server_lock:
             if host_ip in self.shared_servers:
-                # Increment usage count for existing server
                 self.shared_servers[host_ip]['usage_count'] += 1
                 self.log(f"Reusing server for {host_ip} (usage: {self.shared_servers[host_ip]['usage_count']})")
                 return self.shared_servers[host_ip]['server']
             
-            # Create new server
             try:
-                from network import start_server  # Fix: Use the correct import
+                from network import start_server
                 server = start_server(directory, 80, self.log)
                 if server:
                     self.shared_servers[host_ip] = {
@@ -459,10 +486,9 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 remaining = self.shared_servers[host_ip]['usage_count']
                 self.log(f"Released server for {host_ip} (remaining usage: {remaining})")
                 
-                # If no more units using this server, shut it down
                 if remaining <= 0:
                     try:
-                        from network import stop_server  # Fix: Use the correct import
+                        from network import stop_server
                         stop_server(self.shared_servers[host_ip]['server'], self.log)
                         del self.shared_servers[host_ip]
                         self.log(f"Shut down shared server for {host_ip}")
@@ -474,7 +500,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         with self.server_lock:
             for host_ip, server_info in list(self.shared_servers.items()):
                 try:
-                    from network import stop_server  # Fix: Use the correct import
+                    from network import stop_server
                     stop_server(server_info['server'], self.log)
                     self.log(f"Cleaned up server for {host_ip}")
                 except Exception as e:
@@ -483,80 +509,45 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
     def validate_config(self) -> bool:
         """Validate configuration before starting"""
-        # Check files
-        if not all([self.firmware_folder.get(), self.fip_file.get(), self.eeprom_file.get()]):
-            messagebox.showerror("Error", "Please select all required files")
+        required_files = [self.firmware_folder.get(), self.fip_file.get()]
+        if self.enable_eeprom.get():
+            required_files.append(self.eeprom_file.get())
+            
+        if not all(required_files):
+            messagebox.showerror("Error", "Please select all required files", parent=self)
             return False
             
-        for path in [self.firmware_folder.get(), self.fip_file.get(), self.eeprom_file.get()]:
+        paths_to_check = [self.firmware_folder.get(), self.fip_file.get()]
+        if self.enable_eeprom.get():
+            paths_to_check.append(self.eeprom_file.get())
+            
+        for path in paths_to_check:
             if not os.path.exists(path):
-                messagebox.showerror("Error", f"File not found: {path}")
+                messagebox.showerror("Error", f"File not found: {path}", parent=self)
                 return False
         
-        # Check units
         if not self.units:
-            messagebox.showerror("Error", "Please add at least one unit")
+            messagebox.showerror("Error", "Please add at least one unit", parent=self)
             return False
             
-        # Update configs and validate
         for unit in self.units:
             unit['config'].device = unit['device_var'].get()
             unit['config'].bmc_ip = unit['bmc_ip_var'].get()
             unit['config'].host_ip = unit['host_ip_var'].get()
             
             if not unit['config'].is_valid():
-                messagebox.showerror("Error", f"Unit {unit['id']} has invalid configuration")
+                messagebox.showerror("Error", f"Unit {unit['id']} has invalid configuration", parent=self)
                 return False
         
-        # Check for duplicates
         devices = [unit['config'].device for unit in self.units]
         ips = [unit['config'].bmc_ip for unit in self.units]
         
         if len(devices) != len(set(devices)):
-            messagebox.showerror("Error", "Duplicate devices found")
+            messagebox.showerror("Error", "Duplicate devices found", parent=self)
             return False
             
         if len(ips) != len(set(ips)):
-            messagebox.showerror("Error", "Duplicate BMC IPs found")
-            return False
-        
-        return True
-        """Validate configuration before starting"""
-        # Check files
-        if not all([self.firmware_folder.get(), self.fip_file.get(), self.eeprom_file.get()]):
-            messagebox.showerror("Error", "Please select all required files")
-            return False
-            
-        for path in [self.firmware_folder.get(), self.fip_file.get(), self.eeprom_file.get()]:
-            if not os.path.exists(path):
-                messagebox.showerror("Error", f"File not found: {path}")
-                return False
-        
-        # Check units
-        if not self.units:
-            messagebox.showerror("Error", "Please add at least one unit")
-            return False
-            
-        # Update configs and validate
-        for unit in self.units:
-            unit['config'].device = unit['device_var'].get()
-            unit['config'].bmc_ip = unit['bmc_ip_var'].get()
-            unit['config'].host_ip = unit['host_ip_var'].get()
-            
-            if not unit['config'].is_valid():
-                messagebox.showerror("Error", f"Unit {unit['id']} has invalid configuration")
-                return False
-        
-        # Check for duplicates
-        devices = [unit['config'].device for unit in self.units]
-        ips = [unit['config'].bmc_ip for unit in self.units]
-        
-        if len(devices) != len(set(devices)):
-            messagebox.showerror("Error", "Duplicate devices found")
-            return False
-            
-        if len(ips) != len(set(ips)):
-            messagebox.showerror("Error", "Duplicate BMC IPs found")
+            messagebox.showerror("Error", "Duplicate BMC IPs found", parent=self)
             return False
         
         return True
@@ -566,18 +557,20 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         if self.operation_running:
             return
             
+        self.save_config()
+            
         if not self.validate_config():
             return
             
         if not messagebox.askyesno("Confirm", 
                                   f"Flash {len(self.units)} devices?\n\n"
-                                  "Ensure all are at U-Boot prompt."):
+                                  "Ensure all are at U-Boot prompt.",
+                                  parent=self):
             return
         
         self.operation_running = True
         self.start_button.configure(state="disabled")
         
-        # Reset progress
         self.overall_progress.set(0)
         for unit in self.units:
             unit['progress_bar'].set(0)
@@ -585,7 +578,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             
         self.log("=== MULTI-FLASH STARTED ===")
         
-        # Group units by host IP for server optimization
         ip_groups = {}
         for unit in self.units:
             host_ip = unit['host_ip_var'].get()
@@ -598,24 +590,21 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             unit_ids = [str(u['id']) for u in units]
             self.log(f"  {host_ip}: Units {', '.join(unit_ids)}")
         
-        # Pre-create shared servers
         for host_ip in ip_groups.keys():
             server = self.get_shared_server(host_ip, self.firmware_folder.get())
             if not server:
-                messagebox.showerror("Error", f"Failed to create server for {host_ip}")
+                messagebox.showerror("Error", f"Failed to create server for {host_ip}", parent=self)
                 self.operation_running = False
                 self.start_button.configure(state="normal")
                 return
         
-        # Start threads
         self.flash_threads = {}
         for unit in self.units:
             thread = threading.Thread(target=self.flash_unit, args=(unit,), daemon=True)
             self.flash_threads[unit['id']] = thread
             thread.start()
-            time.sleep(0.5)  # Stagger starts
+            time.sleep(0.5)
         
-        # Monitor progress
         threading.Thread(target=self.monitor_progress, daemon=True).start()
 
     def flash_unit(self, unit):
@@ -624,21 +613,21 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         config = unit['config']
         shared_server = None
         
-        # Update config with current UI values BEFORE starting
         config.device = unit['device_var'].get()
         config.username = unit['username_var'].get()
         config.password = unit['password_var'].get()
         config.bmc_ip = unit['bmc_ip_var'].get()
         config.host_ip = unit['host_ip_var'].get()
         
+        # THREAD-SAFE UI HELPERS
         def update_progress(progress):
-            if self.operation_running:  # Only update if still running
+            if self.operation_running:
                 self.unit_progress[unit_id] = progress
-                unit['progress_bar'].set(progress)
+                self.after(0, unit['progress_bar'].set, progress)
         
         def update_status(status):
-            if self.operation_running:  # Only update if still running
-                unit['status_label'].configure(text=status)
+            if self.operation_running:
+                self.after(0, lambda s=status: unit['status_label'].configure(text=s))
         
         def unit_log(msg):
             self.log(f"[Unit {unit_id}] {msg}")
@@ -648,15 +637,12 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 unit_log("Operation cancelled before start")
                 return
             
-            # Log the config values for debugging
             unit_log(f"Using config - Device: {config.device}, Username: {config.username}, BMC IP: {config.bmc_ip}")
             
-            # Get shared server for this unit's host IP
             shared_server = self.get_shared_server(config.host_ip, self.firmware_folder.get())
             if not shared_server:
                 raise Exception("Failed to get shared server")
             
-            # Step 1: Flash eMMC using shared server
             if not self.operation_running:
                 return
                 
@@ -665,7 +651,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             
             def emmc_progress(p):
                 if self.operation_running:
-                    update_progress(p * 0.2)  # 20% of total
+                    update_progress(p * 0.2)
             
             result = asyncio.run(self.flash_emmc_shared(
                 config.bmc_ip, self.firmware_folder.get(), config.host_ip, 2,
@@ -679,18 +665,16 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                     raise Exception("eMMC flash failed")
                 return
             
-            # Step 2: Login
             if not self.operation_running:
                 return
                 
             update_status("Login")
             unit_log(f"Logging in with username: {config.username}")
-            result = asyncio.run(self.login(config, unit_log))  # Changed from await to asyncio.run
+            result = asyncio.run(self.login(config, unit_log))
             if not self.operation_running:
                 return
             update_progress(0.4)
             
-            # Step 3: Set IP
             if not self.operation_running:
                 return
                 
@@ -703,7 +687,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             
             asyncio.run(set_ip(config.bmc_ip, ip_progress, unit_log, config.device))
             
-            # Step 4: Flash U-Boot using shared server
             if not self.operation_running:
                 return
                 
@@ -719,21 +702,20 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 fip_progress, unit_log, config.device, shared_server
             ))
             
-            # Step 5: Flash EEPROM using shared server
-            if not self.operation_running:
-                return
+            if self.operation_running and self.enable_eeprom.get():
+                update_status("Flash EEPROM")
+                unit_log("Flashing EEPROM")
                 
-            update_status("Flash EEPROM")
-            unit_log("Flashing EEPROM")
-            
-            def eeprom_progress(p):
-                if self.operation_running:
-                    update_progress(0.8 + p * 0.2)
-            
-            asyncio.run(self.flash_eeprom_shared(
-                self.eeprom_file.get(), config.host_ip,
-                eeprom_progress, unit_log, config.device, shared_server
-            ))
+                def eeprom_progress(p):
+                    if self.operation_running:
+                        update_progress(0.8 + p * 0.2)
+                
+                asyncio.run(self.flash_eeprom_shared(
+                    self.eeprom_file.get(), config.host_ip,
+                    eeprom_progress, unit_log, config.device, shared_server
+                ))
+            elif not self.enable_eeprom.get():
+                unit_log("Skipping EEPROM flash (disabled)")
             
             if self.operation_running:
                 update_progress(1.0)
@@ -748,7 +730,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 unit_log("Operation cancelled")
             update_progress(0)
         finally:
-            # Release the shared server
             if shared_server:
                 self.release_shared_server(config.host_ip)
 
@@ -767,21 +748,18 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
             ser = serial.Serial(serial_device, 115200, timeout=0.1)
 
-            # Setting IP Address (bootloader)
             callback_output("Setting IP Address (bootloader)...")
             command = f'setenv ipaddr {bmc_ip}\n'
             response = await asyncio.to_thread(read_serial_data, ser, command, 2)
             callback_output(response)
             callback_progress(0.20)
 
-            # Grabbing virtual restore image
             callback_output("Grabbing virtual restore image...")
             command = f'wget ${{loadaddr}} {my_ip}:/obmc-rescue-image-snuc-{type_name}.itb; bootm\n'
             response = await asyncio.to_thread(read_serial_data, ser, command, 2)
             callback_output(response)
             callback_progress(0.40)
 
-            # Setting IP Address (BMC)
             callback_output("Setting IP Address (BMC)...")
             await asyncio.sleep(20)
             command = f'ifconfig eth0 up {bmc_ip}\n'
@@ -789,21 +767,18 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             callback_output(response)
             callback_progress(0.50)
 
-            # Grabbing restore image
             callback_output("Grabbing restore image...")
             command = f"curl -o obmc-phosphor-image-snuc-{type_name}.wic.xz {my_ip}/obmc-phosphor-image-snuc-{type_name}.wic.xz\n"
             response = await asyncio.to_thread(read_serial_data, ser, command, 2)
             callback_output(response)
             callback_progress(0.60)
 
-            # Grabbing the mapping file
             callback_output("Grabbing the mapping file...")
             command = f'curl -o obmc-phosphor-image-snuc-{type_name}.wic.bmap {my_ip}/obmc-phosphor-image-snuc-{type_name}.wic.bmap\n'
             response = await asyncio.to_thread(read_serial_data, ser, command, 5)
             callback_output(response)
             callback_progress(0.90)
 
-            # Flashing the restore image
             callback_output("Flashing the restore image...")
             command = f'bmaptool copy obmc-phosphor-image-snuc-{type_name}.wic.xz /dev/mmcblk0\n'
             response = await asyncio.to_thread(read_serial_data, ser, command, 5)
@@ -862,7 +837,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             callback_output("U-Boot flashing complete")
             callback_progress(1)
 
-            # Remove file
             remove_command = f"rm -f {file_name}\n"
             ser.write(remove_command.encode('utf-8'))
             await asyncio.sleep(2)
@@ -885,19 +859,16 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             ser = serial.Serial(serial_device, 115200, timeout=1)
             ser.dtr = True
 
-            # Power on
             callback_output("Powering on...")
             ser.write(b"obmcutil poweron\n")
             await asyncio.sleep(8)
             callback_progress(0.4)
 
-            # Configure EEPROM
             callback_output("Configuring EEPROM...")
             ser.write(b"echo 24c02 0x50 > /sys/class/i2c-adapter/i2c-1/new_device\n")
             await asyncio.sleep(8)
             callback_progress(0.6)
 
-            # Fetch FRU binary
             url = f"http://{my_ip}:{port}/{file_name}"
             curl_command = f"curl -o {file_name} {url}\n"
             ser.write(curl_command.encode('utf-8'))
@@ -906,7 +877,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
             callback_progress(0.8)
 
-            # Flash EEPROM
             callback_output("Flashing EEPROM...")
             flash_command = f"dd if={file_name} of=/sys/bus/i2c/devices/1-0050/eeprom\n"
             ser.write(flash_command.encode('utf-8'))
@@ -914,14 +884,12 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             callback_output("EEPROM flashing complete.")
             callback_progress(1.0)
 
-            # Remove FRU binary
             callback_output("Removing FRU binary...")
             remove_command = f"rm -f {file_name}\n"
             ser.write(remove_command.encode('utf-8'))
             await asyncio.sleep(5)
             callback_output("FRU binary removed successfully.")
 
-            # Reboot
             callback_output("Rebooting system...")
             ser.write(b"obmcutil poweroff && reboot\n")
             await asyncio.sleep(5)
@@ -932,7 +900,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         finally:
             if ser and ser.is_open:
                 ser.close()
- 
 
     def monitor_progress(self):
         """Monitor overall progress"""
@@ -940,13 +907,13 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             active_threads = [t for t in self.flash_threads.values() if t.is_alive()]
             
             if not active_threads:
-                # All done
                 self.operation_running = False
-                self.start_button.configure(state="normal")
+                # Safe updates
+                self.after(0, lambda: self.start_button.configure(state="normal"))
                 
                 total_progress = sum(self.unit_progress.values())
                 avg_progress = total_progress / len(self.units) if self.units else 0
-                self.overall_progress.set(avg_progress)
+                self.after(0, self.overall_progress.set, avg_progress)
                 
                 if avg_progress >= 1.0:
                     self.log("🎉 ALL UNITS COMPLETED!")
@@ -954,10 +921,9 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                     self.log("⚠️ Completed with errors")
                 break
             else:
-                # Update overall progress
                 total_progress = sum(self.unit_progress.values())
                 avg_progress = total_progress / len(self.units) if self.units else 0
-                self.overall_progress.set(avg_progress)
+                self.after(0, self.overall_progress.set, avg_progress)
             
             time.sleep(1)
 
@@ -966,54 +932,49 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         if not self.operation_running:
             return
             
-        if messagebox.askyesno("Confirm", "Stop all operations?"):
+        if messagebox.askyesno("Confirm", "Stop all operations?", parent=self):
             self.log("🛑 STOPPING ALL OPERATIONS")
             self.operation_running = False
             
             for unit in self.units:
-                unit['status_label'].configure(text="Stopped")
+                # Safe update
+                self.after(0, lambda l=unit['status_label']: l.configure(text="Stopped"))
             
-            # Cleanup all shared servers
             self.cleanup_all_servers()
             
-            self.start_button.configure(state="normal")
+            # Safe update
+            self.after(0, lambda: self.start_button.configure(state="normal"))
             
-            # Clean up serial connections without error messages
             try:
                 cleanup_all_serial_connections()
             except:
-                pass  # Ignore any errors during cleanup
+                pass
 
     def open_console(self):
         """Open multi-console with persistent configuration"""
         units_with_devices = [u for u in self.units if u['device_var'].get()]
         if not units_with_devices:
-            messagebox.showwarning("No Devices", "No units have devices selected")
+            messagebox.showwarning("No Devices", "No units have devices selected", parent=self)
             return
         
         try:
             self.log(f"Opening console for {len(units_with_devices)} units")
             
-            # List the devices for debugging
             for unit in units_with_devices:
                 device = unit['device_var'].get()
                 self.log(f"  Unit {unit['id']}: {device}")
             
-            # Clean up any existing console processes first
             self.cleanup_console_processes()
             
-            # Try different console methods in order of preference
             console_opened = False
             
-            # Method 1: Try Terminator with persistent config
             self.log("Trying Terminator...")
             console_opened = self.try_terminator_console(units_with_devices)
             
             if console_opened:
                 self.log("Terminator multi-console opened successfully")
-                return  # Don't try other methods if Terminator worked
+                return
             
-            # Method 2: Try tmux as fallback
             self.log("Terminator failed, trying tmux...")
             console_opened = self.try_tmux_console(units_with_devices)
             
@@ -1021,7 +982,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 self.log("tmux multi-console opened successfully")
                 return
             
-            # Method 3: Try screen as fallback
             self.log("tmux failed, trying screen...")
             console_opened = self.try_screen_console(units_with_devices)
             
@@ -1029,50 +989,41 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 self.log("screen multi-console opened successfully")
                 return
             
-            # Method 4: Individual xterm windows as last resort
             self.log("All multiplexers failed, opening individual consoles...")
             self.open_individual_consoles(units_with_devices)
             
         except Exception as e:
             self.log(f"Console error: {e}")
-            # Emergency fallback
             self.open_individual_consoles(units_with_devices)
 
     def try_terminator_console(self, units_with_devices):
         """Try to open Terminator with persistent config"""
         try:
-            # If more than 4 units, fall back to individual windows
             if len(units_with_devices) > 4:
                 self.log("Too many units for terminator multi-pane, falling back to individual windows")
                 return False
             
-            # First test if terminator works at all
             test_result = subprocess.run(['terminator', '--version'], 
                                     capture_output=True, timeout=3)
             if test_result.returncode != 0:
                 self.log("Terminator version check failed")
                 return False
             
-            # Create persistent config directory
             config_dir = os.path.expanduser("~/.config/terminator")
             os.makedirs(config_dir, exist_ok=True)
             
-            # Create persistent config file with unique name
             import time
             config_file = os.path.join(config_dir, f"nanobmc_multiflash_{int(time.time())}")
             config_content = self.generate_terminator_config(units_with_devices)
             
-            # If config generation failed (too many units), fall back
             if config_content is None:
                 return False
             
-            # Debug: log the config content
             self.log(f"Generated config file: {config_file}")
             
             with open(config_file, 'w') as f:
                 f.write(config_content)
             
-            # Test the config first
             test_cmd = ["terminator", "--config", config_file, "--help"]
             test_result = subprocess.run(test_cmd, capture_output=True, timeout=5)
             
@@ -1080,7 +1031,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 self.log(f"Config test failed: {test_result.stderr.decode()}")
                 return False
             
-            # Launch terminator
             cmd = [
                 "terminator", 
                 "--config", config_file, 
@@ -1090,20 +1040,17 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             
             self.log(f"Launching: {' '.join(cmd)}")
             
-            # Launch and detach
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL, 
                 stderr=subprocess.DEVNULL,
-                preexec_fn=os.setsid  # Create new session
+                preexec_fn=os.setsid
             )
             
-            # Store for cleanup
             if not hasattr(self, 'console_processes'):
                 self.console_processes = []
             self.console_processes.append(process)
             
-            # Clean up config file after a delay
             def cleanup_config():
                 time.sleep(10)
                 try:
@@ -1130,11 +1077,9 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         try:
             session_name = "nanobmc_multiflash"
             
-            # Kill existing session if it exists
             subprocess.run(["tmux", "kill-session", "-t", session_name], 
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # Create new tmux session with first unit
             first_unit = units_with_devices[0]
             subprocess.run([
                 "tmux", "new-session", "-d", "-s", session_name,
@@ -1142,20 +1087,17 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 f"minicom -D {first_unit['device_var'].get()}"
             ])
             
-            # Add additional panes for other units
             for i, unit in enumerate(units_with_devices[1:], 1):
                 device = unit['device_var'].get()
-                if i % 2 == 1:  # Split horizontally
+                if i % 2 == 1:
                     subprocess.run(["tmux", "split-window", "-h", "-t", session_name, 
                                   f"minicom -D {device}"])
-                else:  # Split vertically
+                else:
                     subprocess.run(["tmux", "split-window", "-v", "-t", session_name, 
                                   f"minicom -D {device}"])
             
-            # Balance the panes
             subprocess.run(["tmux", "select-layout", "-t", session_name, "tiled"])
             
-            # Attach to session in new terminal
             subprocess.Popen([
                 "x-terminal-emulator", "-e", 
                 f"tmux attach-session -t {session_name}"
@@ -1176,18 +1118,15 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         try:
             session_name = "nanobmc_multiflash"
             
-            # Kill existing session if it exists  
             subprocess.run(["screen", "-S", session_name, "-X", "quit"], 
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # Create screen session with first unit
             first_unit = units_with_devices[0]
             subprocess.run([
                 "screen", "-dmS", session_name,
                 "minicom", "-D", first_unit['device_var'].get()
             ])
             
-            # Add windows for other units
             for i, unit in enumerate(units_with_devices[1:], 1):
                 device = unit['device_var'].get()
                 subprocess.run([
@@ -1195,7 +1134,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                     "minicom", "-D", device
                 ])
             
-            # Attach to session in new terminal
             subprocess.Popen([
                 "x-terminal-emulator", "-e", 
                 f"screen -r {session_name}"
@@ -1224,7 +1162,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             bmc_ip = unit['bmc_ip_var'].get() or "No IP"
             
             try:
-                # Try different terminal emulators
                 terminal_commands = [
                     ["x-terminal-emulator", "-T", f"Unit {unit_id} - {device} - {bmc_ip}", 
                      "-e", f"minicom -D {device}"],
@@ -1258,7 +1195,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         try:
             self.log("Cleaning up console processes and closing ALL minicom instances...")
             
-            # Kill ALL minicom processes (not just our devices)
             try:
                 import psutil
                 minicom_pids = []
@@ -1271,11 +1207,9 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
                 
-                # Wait for minicom processes to terminate
                 import time
                 time.sleep(1)
                 
-                # Force kill any that didn't terminate
                 for pid in minicom_pids:
                     try:
                         proc = psutil.Process(pid)
@@ -1289,7 +1223,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                     self.log(f"Closed {len(minicom_pids)} minicom processes")
                             
             except ImportError:
-                # Fallback if psutil not available - kill all minicom processes
                 try:
                     subprocess.run(["pkill", "minicom"], 
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1297,11 +1230,10 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                 except:
                     pass
             
-            # Clean up tracked processes
             if hasattr(self, 'console_processes'):
                 for proc in self.console_processes:
                     try:
-                        if proc.poll() is None:  # Process is still running
+                        if proc.poll() is None:
                             self.log(f"Terminating console process PID {proc.pid}")
                             proc.terminate()
                             try:
@@ -1312,24 +1244,19 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
                         pass
                 self.console_processes = []
             
-            # Clean up terminal multiplexers
             try:
-                # Kill tmux sessions
                 subprocess.run(["tmux", "kill-session", "-t", "nanobmc_multiflash"], 
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                # Kill screen sessions
                 subprocess.run(["screen", "-S", "nanobmc_multiflash", "-X", "quit"], 
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                # Kill terminator processes with our config
                 subprocess.run(["pkill", "-f", "nanobmc_multiflash"], 
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                             
             except (FileNotFoundError, subprocess.SubprocessError):
                 pass
             
-            # Clean up serial connections
             try:
                 from utils import cleanup_all_serial_connections
                 connections_cleaned = cleanup_all_serial_connections()
@@ -1355,14 +1282,12 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         cursor_color = "#aaaaaa"
     """
         
-        # Add profiles for each unit with device and IP info
         for unit in units:
             device = unit['device_var'].get()
             unit_id = unit['id']
             bmc_ip = unit['bmc_ip_var'].get() or "No IP"
             
-            # Create a descriptive title
-            device_name = device.split('/')[-1] if device else "No Device"  # Extract ttyUSB0 from /dev/ttyUSB0
+            device_name = device.split('/')[-1] if device else "No Device"
             title = f"Unit{unit_id}-{device_name}-{bmc_ip}"
             
             config += f"""  [[unit_{unit_id}]]
@@ -1399,7 +1324,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         title = NanoBMC Multi-Console
     """
         elif num_units == 2:
-            # Side by side for 2 units
             config += f"""    [[[child1]]]
         parent = window0
         type = HPaned
@@ -1421,7 +1345,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         title = NanoBMC Multi-Console
     """
         elif num_units == 3:
-            # Top 2, bottom 1
             config += f"""    [[[child1]]]
         parent = window0
         type = VPaned
@@ -1452,7 +1375,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         title = NanoBMC Multi-Console
     """
         elif num_units == 4:
-            # 2x2 grid
             config += f"""    [[[child1]]]
         parent = window0
         type = VPaned
@@ -1492,7 +1414,6 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         title = NanoBMC Multi-Console
     """
         else:
-            # For more than 4, use individual windows instead
             self.log(f"Too many units ({num_units}) for multi-pane. Opening individual windows.")
             return None
         
@@ -1503,43 +1424,37 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
         timestamp = time.strftime("%H:%M:%S")
         formatted = f"[{timestamp}] {message}\n"
         
-        if hasattr(self, 'log_text'):
-            self.log_text.insert(tk.END, formatted)
-            self.log_text.see(tk.END)
+        self.after(0, self._log_internal, formatted)
         
-        # Also log to main app
         if hasattr(self.app_instance, 'log_message'):
-            self.app_instance.log_message(f"[Multi] {message}")
+            self.after(0, self.app_instance.log_message, f"[Multi] {message}")
+
+    def _log_internal(self, formatted_message):
+        if hasattr(self, 'log_text'):
+            self.log_text.insert(tk.END, formatted_message)
+            self.log_text.see(tk.END)
 
     def on_close(self):
         """Handle window close with comprehensive cleanup"""
         self.log("Multi-unit window closing - performing cleanup...")
         
-        # Save configuration before closing
         self.save_config()
         
-        # Stop all operations first
         if self.operation_running:
             self.stop_all()
         else:
-            # Cleanup servers even if not running operations
             self.cleanup_all_servers()
         
-        # Clean up console processesf
         self.cleanup_console_processes()
         
-        # Clean up any serial connections
         cleanup_all_serial_connections()
         
-        # Additional cleanup for any remaining processes
         try:
-            # Force cleanup of any remaining terminator processes
             subprocess.run(["pkill", "-f", "nanobmc.*terminator"], 
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except (FileNotFoundError, subprocess.SubprocessError):
             pass
         
-        # Destroy the window
         self.destroy()
 
     async def login(self, config, log_func):

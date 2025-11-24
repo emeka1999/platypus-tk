@@ -1,11 +1,16 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox
-import asyncio, glob, bmc, json, os, time, psutil, threading, subprocess  # Added subprocess import
+import asyncio, glob, bmc, json, os, time, psutil, threading, subprocess
+import serial
 from utils import *
 from network import *
 from functools import partial
 from threading import Thread
+import tempfile
+import atexit
+from http.server import SimpleHTTPRequestHandler, HTTPServer
+import functools # <-- Import functools
 
 try:
     from extra import create_multi_unit_window
@@ -13,6 +18,482 @@ try:
 except ImportError:
     MULTI_UNIT_AVAILABLE = False
     print("Multi-unit functionality not available (extra.py not found)")
+
+# --- Embedded DMI Scripts ---
+
+# FRU_flash_v2.sh content
+FRU_FLASH_SCRIPT_CONTENT = r"""
+#!/usr/bin/env bash
+#
+# flash_fru.sh — Generate and flash FRU data to an I2C EEPROM (24C02 @ 0x50)
+#
+# Usage:
+#   sudo ./flash_fru.sh --sku <SKU> --asmid <ASMID> [--mfg "SimplyNuc"] [--i2c-bus 1] [--dry-run]
+#
+# Example:
+#   sudo ./flash_fru.sh --sku S1M0-F01-ABCD --asmid IP0DC4250840001 --mfg "SimplyNuc"
+#
+# Notes:
+# - Requires root (writes to /sys and /sys/bus/i2c)
+# - Requires: frugy, uuidgen, md5sum, dd, grep, sed, rev, cut
+# - Default I2C bus is 1; override with --i2c-bus N
+# - Uses 24c02 at 0x50;
+
+set -Eeuo pipefail
+
+# ----------------------- config / globals -----------------------
+I2C_BUS=1                 # default; can be overridden via --i2c-bus
+I2C_ADDR_HEX=0x50         # 24c02 at 0x50
+EE_TYPE="24c02"
+TMP_DIR="/tmp"
+YML_NAME="$TMP_DIR/fru.yml"
+BIN_NAME="$TMP_DIR/fru.bin"
+SUM_NAME="$TMP_DIR/FRUMD5"
+DRY_RUN=0
+
+# ----------------------- logging helpers ------------------------
+echo_BMC() {
+  echo "[BMC] $*" >&2
+}
+
+die() {
+  echo_BMC "ERROR: $*"
+  exit 1
+}
+
+cleanup() {
+  # Keep artifacts by default (useful for audit); uncomment to remove
+  # rm -f "$YML_NAME" "$BIN_NAME" "$SUM_NAME" || true
+  :
+}
+trap cleanup EXIT
+
+# ----------------------- usage ---------------------------------
+usage() {
+  cat <<EOF
+Usage:
+  sudo $0 --sku <SKU> --asmid <ASMID> [--mfg "SimplyNuc"] [--i2c-bus 1] [--dry-run]
+
+Required:
+  --sku <SKU>       Device SKU (e.g., S1M0-F01-XXXX, S0M1-XXXX, V3B-XXXX, R8B-XXXX)
+  --asmid <ASMID>   Assembly ID containing IP/AK serial (e.g., IP0DC4250840001)
+
+Optional:
+  --mfg <NAME>      Manufacturer string (default: "SimplyNuc")
+  --i2c-bus <N>     I2C bus number to use (default: 1)
+  --dry-run         Generate files, skip writing to EEPROM
+  -h | --help       Show this help
+
+This script:
+  1) Ensures /sys i2c node exists for ${EE_TYPE} at ${I2C_ADDR_HEX} on i2c-\$bus
+  2) Generates FRU YAML and binary via 'frugy'
+  3) Writes FRU binary to the EEPROM at /sys/bus/i2c/devices/i2c-\$bus/\$bus-0050/eeprom
+EOF
+}
+
+# ----------------------- arg parsing ----------------------------
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 1
+fi
+
+SKU=""
+ASMID=""
+MFG="SimplyNuc"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --sku)        SKU="${2:-}"; shift 2 ;;
+    --asmid)      ASMID="${2:-}"; shift 2 ;;
+    --mfg)        MFG="${2:-}"; shift 2 ;;
+    --i2c-bus)    I2C_BUS="${2:-}"; shift 2 ;;
+    --dry-run)    DRY_RUN=1; shift ;;
+    -h|--help)    usage; exit 0 ;;
+    *)            die "Unknown argument: $1 (use --help)" ;;
+  esac
+done
+
+I2C_BUS=1
+
+[[ -n "$SKU"   ]] || { usage; die "Missing --sku"; }
+[[ -n "$ASMID" ]] || { usage; die "Missing --asmid"; }
+
+# ----------------------- preflight checks -----------------------
+if [[ $EUID -ne 0 ]]; then
+  die "Must be run as root (needs access to /sys). Try: sudo $0 ..."
+fi
+
+require_bin() {
+  command -v "$1" >/dev/null 2>&1 || die "Required tool '$1' not found in PATH"
+}
+require_bin frugy
+require_bin uuidgen
+require_bin md5sum
+require_bin dd
+require_bin grep
+require_bin sed
+require_bin rev
+require_bin cut
+
+# ----------------------- resolve device path --------------------
+I2C_DEV_DIR="/sys/bus/i2c/devices/i2c-${I2C_BUS}"
+NEW_DEV_PATH="${I2C_DEV_DIR}/new_device"
+EE_NODE="/sys/bus/i2c/devices/i2c-${I2C_BUS}/${I2C_BUS}-0050"
+
+EEPROM_FILE="${EE_NODE}/eeprom"
+
+[[ -d "$I2C_DEV_DIR" ]] || die "I2C bus $I2C_BUS not present at $I2C_DEV_DIR"
+
+# Add device if not present
+if [[ ! -e "$EEPROM_FILE" ]]; then
+  echo_BMC "Adding I2C device ${EE_TYPE} at ${I2C_ADDR_HEX} on i2c-${I2C_BUS}"
+  echo "${EE_TYPE} ${I2C_ADDR_HEX}" > "$NEW_DEV_PATH" || die "Failed to create I2C device node"
+else
+  echo_BMC "EEPROM node already present at $EEPROM_FILE"
+fi
+
+# Verify EEPROM path
+[[ -e "$EEPROM_FILE" ]] || die "EEPROM file not found at $EEPROM_FILE"
+
+# ----------------------- derive fields --------------------------
+echo_BMC "Input SKU: $SKU"
+echo_BMC "Input ASMid: $ASMID"
+echo_BMC "Manufacturer: $MFG"
+
+# Map SKU -> product name
+device="$(echo -n "$SKU" | grep -ioE 'S1M0|S0M1|S.M.|V3B|R8B|EE[0-9]{4}|ME[0-9]{4}' | head -n1 || true)"
+pname=""
+case "$device" in
+  S1M0|EE2000|ME2000)   pname="EE-2000" ;;
+  S0M1|EE2100|ME2100)   pname="EE-2100" ;;
+  EE2200|ME2200)        pname="EE-2200" ;;
+  EE2300|ME2300)        pname="EE-2300" ;;
+  V3B|EE3000|ME3000)    pname="EE-3000" ;;
+  EE3100|ME3100)        pname="EE-3100" ;;
+  R8B|EE3200|ME3200)    pname="EE-3200" ;;
+  *)    ;;
+esac
+[[ -n "$pname" ]] || die "Unsupported or unrecognized SKU device code in '$SKU'"
+
+# Serial from ASMid (IPnnn… or AKnnn…); keep last 15 chars of the match
+serial="$ASMID"
+if [[ -z "$serial" ]]; then
+  serial="$ASMID"
+fi
+[[ -n "$serial" ]] || die "Could not extract serial (IPxxxx or AKxxxx) from ASMid '$ASMID'"
+serial="$(echo -n "$serial" | rev | cut -c1-15 | rev)"
+
+date_now="$(date +'%Y-%m-%dT%H:%M:%S')"
+uuid_val="$(uuidgen)"
+
+# Fan suffix if SKU contains F01
+fan_suffix=""
+if [[ "$SKU" == *"F01"* ]]; then
+  fan_suffix="-FAN"
+  echo_BMC "SKU includes fans (F01 detected)"
+fi
+
+echo_BMC "Resolved product name: ${pname}${fan_suffix}"
+echo_BMC "Derived serial: $serial"
+echo_BMC "Timestamp: $date_now"
+echo_BMC "UUID: $uuid_val"
+
+# ----------------------- build YAML -----------------------------
+echo_BMC "Generating FRU YAML at $YML_NAME"
+{
+  printf "BoardInfo:\n"
+  printf "  manufacturer: \"%s\"\n"                "$MFG"
+  printf "  product_name: \"%s%s\"\n"              "$pname" "$fan_suffix"
+  printf "  serial_number: \"%s\"\n"               "$serial"
+  printf "  part_number: \"SN%s\"\n"               "$serial"
+  printf "  mfg_date_time: \"%s\"\n"               "$date_now"
+
+  printf "ProductInfo:\n"
+  printf "  manufacturer: \"%s\"\n"                "$MFG"
+  printf "  product_name: \"%s%s\"\n"              "$pname" "$fan_suffix"
+  printf "  part_number: \"SN%s\"\n"               "$serial"
+  printf "  serial_number: \"%s\"\n"               "$serial"
+
+  printf "MultirecordArea:\n"
+  printf "%s\n" "- type: MgmtAccessRecord"
+  printf "  id: \"%s\"\n"                          "sys_unique_id"
+  printf "  blob: \"%s\"\n"                        "$uuid_val"
+} > "$YML_NAME"
+
+echo_BMC "FRU YAML contents:"
+cat "$YML_NAME"
+
+# ----------------------- generate BIN ---------------------------
+echo_BMC "Generating FRU binary at $BIN_NAME"
+frugy "$YML_NAME" -o "$BIN_NAME" -e 256 || die "frugy failed"
+
+[[ -e "$BIN_NAME" ]] || die "FRU binary not created: $BIN_NAME"
+
+md5sum "$BIN_NAME" > "$SUM_NAME"
+echo_BMC "MD5 of FRU binary:"
+
+# ----------------------- flash to EEPROM ------------------------
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo_BMC "[DRY-RUN] Skipping write to $EEPROM_FILE"
+  exit 0
+fi
+
+echo_BMC "Flashing FRU to EEPROM at $EEPROM_FILE"
+# Use status=progress for visibility; notrunc to avoid truncation issues on some sysfs eeprom drivers
+dd if="$BIN_NAME" of="$EEPROM_FILE" bs=1 count=256
+
+echo_BMC "FRU binary flashed successfully."
+
+echo_BMC "Reading FRU from EEPROM"
+dd if="$EEPROM_FILE" of="$BIN_NAME" bs=1 count=256
+
+expectedFRUmd5=$(awk '{print $1}' "$SUM_NAME")
+actualFRUmd5=$(md5sum "$BIN_NAME" | awk '{print $1}')
+
+if [ "$actualFRUmd5" != "$expectedFRUmd5" ]; then
+    die "FRU binaries are not the same..."
+fi
+
+echo_BMC "Done, checksums were validated successfully."
+"""
+
+# --- Global HTTP Server Variable ---
+http_server = None
+server_lock = threading.Lock()
+temp_dir = tempfile.gettempdir()
+
+# --- DMI Flasher Utility Functions ---
+
+def read_serial_data_sync(ser, command, timeout=10, output_callback=None, eol=b'\n'):
+    """
+    Synchronous serial data reading function.
+    Sends a command, then reads until a prompt or timeout.
+    """
+    try:
+        ser.write(command)
+        if output_callback:
+            # Try to show the command, handling potential bytes/str issues
+            try:
+                cmd_str = command.decode('utf-8').strip()
+                if cmd_str:
+                    output_callback(f"# {cmd_str}")
+            except UnicodeDecodeError:
+                output_callback(f"# [sent {len(command)} bytes]")
+        
+        ser.flush()
+        
+        line_buffer = b""
+        full_response = b""
+        start_time = time.time()
+        
+        prompt_markers = [b'root@', b'# ', b'> '] # Common prompts
+        
+        while time.time() - start_time < timeout:
+            if ser.in_waiting > 0:
+                new_byte = ser.read(1)
+                if not new_byte:
+                    continue
+                
+                line_buffer += new_byte
+                full_response += new_byte
+                
+                # Check for end-of-line
+                if new_byte == eol:
+                    if output_callback:
+                        try:
+                            output_callback(line_buffer.decode('utf-8').strip())
+                        except UnicodeDecodeError:
+                            output_callback(f"[raw bytes: {line_buffer.hex()}]")
+                    line_buffer = b"" # Reset line buffer
+                
+                # Check for prompt
+                if any(marker in full_response for marker in prompt_markers):
+                    if output_callback and line_buffer:
+                        try:
+                            output_callback(line_buffer.decode('utf-8').strip())
+                        except UnicodeDecodeError:
+                             output_callback(f"[raw bytes: {line_buffer.hex()}]")
+                    return full_response.decode('utf-8', errors='ignore')
+
+            else:
+                time.sleep(0.05)
+        
+        # Timeout occurred
+        if output_callback:
+            output_callback(f"[Timeout after {timeout}s]")
+            if line_buffer:
+                try:
+                    output_callback(line_buffer.decode('utf-8').strip())
+                except UnicodeDecodeError:
+                     output_callback(f"[raw bytes: {line_buffer.hex()}]")
+        return full_response.decode('utf-8', errors='ignore')
+
+    except serial.SerialException as e:
+        if output_callback:
+            output_callback(f"Serial Error: {e}")
+        return f"Serial Error: {e}"
+    except Exception as e:
+        if output_callback:
+            output_callback(f"Error in read_serial_data: {e}")
+        return f"Error: {e}"
+
+def start_server_dmi(directory, port, callback_output):
+    """Starts a simple HTTP server in a separate thread."""
+    global http_server
+    with server_lock:
+        if http_server:
+            callback_output("Server is already running.")
+            return http_server
+        
+        try:
+            # --- FIX ---
+            # Create a request handler that is bound to the target directory
+            # This avoids using os.chdir, which is thread-unsafe.
+            Handler = functools.partial(SimpleHTTPRequestHandler, directory=directory)
+            
+            http_server = HTTPServer(('0.0.0.0', port), Handler)
+            
+            threading.Thread(target=http_server.serve_forever, daemon=True).start()
+            callback_output(f"Serving files from {directory} on port {port}")
+            # No os.chdir or os.chdir back is needed
+            return http_server
+        except Exception as e:
+            callback_output(f"Failed to start server: {e}")
+            http_server = None
+            return None
+
+def stop_server_dmi(callback_output):
+    """Stops the global HTTP server."""
+    global http_server
+    with server_lock:
+        if http_server:
+            try:
+                http_server.shutdown()
+                http_server.server_close()
+                callback_output("Server has been stopped.")
+            except Exception as e:
+                callback_output(f"Error stopping server: {e}")
+            finally:
+                http_server = None
+        else:
+            callback_output("Server is not running.")
+            
+@atexit.register
+def cleanup_server_on_exit():
+    """Ensure server is stopped when the application exits."""
+    global http_server
+    if http_server:
+        print("Cleaning up HTTP server on exit...")
+        http_server.shutdown()
+        http_server.server_close()
+
+async def transfer_and_run_script(
+    serial_device,
+    host_ip,
+    script_content,
+    script_name,
+    script_args,
+    callback_output,
+    callback_progress
+):
+    """
+    Transfers a script to the BMC via HTTP/curl and then executes it.
+    """
+    global temp_dir
+    port = 8000 # Use a non-privileged port to avoid sudo
+    httpd = None
+    ser = None
+    temp_script_path = ""
+
+    try:
+        callback_progress(0.1)
+        callback_output(f"Preparing to transfer {script_name}...")
+
+        # 1. Write the script content to a temporary file
+        try:
+            # We create the temp file in our serving directory
+            temp_script_path = os.path.join(temp_dir, script_name)
+            with open(temp_script_path, 'w') as f:
+                f.write(script_content)
+            callback_output(f"Temporary script created at {temp_script_path}")
+        except Exception as e:
+            callback_output(f"Failed to create temporary script file: {e}")
+            return
+
+        # 2. Start the HTTP server
+        callback_progress(0.2)
+        httpd = start_server_dmi(temp_dir, port, callback_output)
+        if not httpd:
+            callback_output("Failed to start local HTTP server. Aborting.")
+            return
+
+        # 3. Open Serial Connection
+        callback_progress(0.3)
+        try:
+            ser = serial.Serial(serial_device, 115200, timeout=1)
+            ser.dtr = True
+            callback_output(f"Serial connection open on {serial_device}")
+        except serial.SerialException as e:
+            callback_output(f"Failed to open serial port {serial_device}: {e}")
+            return
+            
+        # Ensure we are at a prompt
+        await asyncio.to_thread(read_serial_data_sync, ser, b'\n', 1, callback_output)
+
+        # 4. Transfer script to BMC using curl
+        callback_progress(0.4)
+        bmc_script_path = f"/tmp/{script_name}"
+        url = f"http://{host_ip}:{port}/{script_name}"
+        curl_command = f"curl -o {bmc_script_path} {url}\n".encode('utf-8')
+        
+        callback_output(f"Transferring script to BMC: {url} -> {bmc_script_path}")
+        await asyncio.to_thread(read_serial_data_sync, ser, curl_command, 20, callback_output)
+        callback_output("Transfer complete.")
+
+        # 5. Make script executable
+        callback_progress(0.6)
+        chmod_command = f"chmod +x {bmc_script_path}\n".encode('utf-8')
+        callback_output(f"Making script executable: chmod +x {bmc_script_path}")
+        await asyncio.to_thread(read_serial_data_sync, ser, chmod_command, 5, callback_output)
+        callback_output("Permissions set.")
+
+        # 6. Execute the script
+        callback_progress(0.8)
+        exec_command_str = f"{bmc_script_path} {script_args}\n"
+        exec_command = exec_command_str.encode('utf-8')
+        callback_output(f"Executing script on BMC: {exec_command_str.strip()}")
+        
+        # Use a longer timeout for script execution
+        await asyncio.to_thread(read_serial_data_sync, ser, exec_command, 60, callback_output)
+        callback_output(f"Script {script_name} execution finished.")
+
+        callback_progress(1.0)
+
+    except Exception as e:
+        callback_output(f"An error occurred: {e}")
+        callback_progress(0)
+    finally:
+        # 7. Clean up
+        if ser and ser.is_open:
+            ser.close()
+            callback_output("Serial connection closed.")
+        
+        if httpd:
+            stop_server_dmi(callback_output)
+            
+        if temp_script_path and os.path.exists(temp_script_path):
+            try:
+                os.remove(temp_script_path)
+                callback_output(f"Temporary script {temp_script_path} removed.")
+            except Exception as e:
+                callback_output(f"Warning: could not remove temp script: {e}")
+        
+        # Reset progress bar after a delay
+        await asyncio.sleep(2)
+        callback_progress(0)
+
+
+# --- Main Application Class ---
 
 class FileSelectionHelper:
     """Helper class to standardize and simplify file/directory selection dialogs"""
@@ -210,7 +691,7 @@ class FlashAllWindow(ctk.CTkToplevel):
         self.parent = parent
         self.app_instance = app_instance  # Store the app instance
         self.title("Select Files for Flashing")
-        self.geometry("500x400")
+        self.geometry("500x450") # Increased height for checkbox
         
         # Set parent relationship but DON'T make it modal
         self.transient(parent)
@@ -219,6 +700,7 @@ class FlashAllWindow(ctk.CTkToplevel):
         self.firmware_folder = ctk.StringVar()
         self.fip_file = ctk.StringVar()
         self.eeprom_file = ctk.StringVar()
+        self.flash_fru_var = ctk.BooleanVar() # For the checkbox
         
         # Load previously selected files from config
         self.load_previous_selections()
@@ -240,6 +722,9 @@ class FlashAllWindow(ctk.CTkToplevel):
             
         if hasattr(self.app_instance, 'last_flash_all_eeprom'):
             self.eeprom_file.set(self.app_instance.last_flash_all_eeprom)
+            
+        # Load checkbox state
+        self.flash_fru_var.set(getattr(self.app_instance, 'last_flash_all_do_fru', True))
 
     def save_selections_to_config(self):
         """Save current selections to app config"""
@@ -251,6 +736,9 @@ class FlashAllWindow(ctk.CTkToplevel):
             
         if self.eeprom_file.get():
             self.app_instance.last_flash_all_eeprom = self.eeprom_file.get()
+            
+        # Save checkbox state
+        self.app_instance.last_flash_all_do_fru = self.flash_fru_var.get()
             
         # Save config if the method exists
         if hasattr(self.app_instance, 'save_config'):
@@ -286,10 +774,31 @@ class FlashAllWindow(ctk.CTkToplevel):
         ctk.CTkEntry(self, textvariable=self.fip_file, width=400).pack()
         ctk.CTkButton(self, text="Browse", command=self.select_fip_file).pack(pady=5)
         
+        # --- EEPROM Section ---
+        
+        def toggle_eeprom_widgets():
+            """Show or hide EEPROM widgets based on checkbox"""
+            if self.flash_fru_var.get():
+                self.eeprom_frame.pack(fill="x", pady=0, padx=10)
+            else:
+                self.eeprom_frame.pack_forget()
+
         if self.bmc_type != 1:
-            ctk.CTkLabel(self, text="EEPROM File (FRU):").pack(pady=5)
-            ctk.CTkEntry(self, textvariable=self.eeprom_file, width=400).pack()
-            ctk.CTkButton(self, text="Browse", command=self.select_eeprom_file).pack(pady=5)
+            ctk.CTkCheckBox(self, text="Flash FRU (EEPROM)?", 
+                            variable=self.flash_fru_var, 
+                            onvalue=True, offvalue=False,
+                            command=toggle_eeprom_widgets).pack(pady=(10, 0))
+            
+            # Frame to hold the EEPROM file widgets
+            self.eeprom_frame = ctk.CTkFrame(self, fg_color="transparent")
+            
+            ctk.CTkLabel(self.eeprom_frame, text="EEPROM File (FRU):").pack(pady=5)
+            ctk.CTkEntry(self.eeprom_frame, textvariable=self.eeprom_file, width=400).pack()
+            ctk.CTkButton(self.eeprom_frame, text="Browse", command=self.select_eeprom_file).pack(pady=5)
+            
+            # Set initial state from loaded config
+            # (self.flash_fru_var was set in load_previous_selections)
+            toggle_eeprom_widgets() # Show/hide based on loaded value
         
         ctk.CTkButton(self, text="Start Flashing", command=self.start_flashing).pack(pady=20)
     
@@ -424,17 +933,26 @@ class FlashAllWindow(ctk.CTkToplevel):
     
     def start_flashing(self):
         """Start the full flashing sequence"""
-        if not self.firmware_folder.get() or not self.fip_file.get() or (self.bmc_type != 1 and not self.eeprom_file.get()):
-            messagebox.showerror("Error", "Please select all required files before proceeding.")
+        
+        # Base validation
+        if not self.firmware_folder.get() or not self.fip_file.get():
+            messagebox.showerror("Error", "Please select Firmware Folder and FIP File before proceeding.")
+            return
+        
+        # Conditional validation for FRU
+        do_flash_fru = self.flash_fru_var.get()
+        if self.bmc_type != 1 and do_flash_fru and not self.eeprom_file.get():
+            messagebox.showerror("Error", "Please select an EEPROM file (fru.bin) if 'Flash FRU' is checked.")
             return
         
         # Save the selections before starting the thread
         self.save_selections_to_config()
         
-        threading.Thread(target=self.run_flash_sequence, daemon=True).start()
+        # Pass do_flash_fru to the sequence
+        threading.Thread(target=self.run_flash_sequence, args=(do_flash_fru,), daemon=True).start()
         self.destroy()  # Close the window when starting the flashing
     
-    def run_flash_sequence(self):
+    def run_flash_sequence(self, do_flash_fru):
         """Execute the full flashing sequence by calling the main app's method"""
         # Get required parameters
         firmware_folder = self.firmware_folder.get()
@@ -447,7 +965,8 @@ class FlashAllWindow(ctk.CTkToplevel):
             firmware_folder,
             fip_file,
             eeprom_file,
-            bmc_type
+            bmc_type,
+            do_flash_fru  # Pass the boolean flag
         )
         
 
@@ -462,7 +981,7 @@ class PlatypusApp:
         # Create main window with specific class name
         self.root = ctk.CTk(className="PlatypusApp")  # Set class name during creation
         self.root.title("Platypus BMC Management")
-        self.root.geometry("800X1000")  # Adjusted to fit 1080p
+        self.root.geometry("800x850")  # Adjusted to fit 1080p
         
         # Initialize variables
         self._init_variables()
@@ -471,6 +990,7 @@ class PlatypusApp:
         self.config_dir = os.path.expanduser("~/.local/platypus")
         os.makedirs(self.config_dir, exist_ok=True)
         self.CONFIG_FILE = os.path.join(self.config_dir, "platypus_config.json")
+        self.SKU_CONFIG_FILE = os.path.join(self.config_dir, "dmi_skus.json")
 
         # Try to set icon (optional)
         try:
@@ -482,6 +1002,7 @@ class PlatypusApp:
             pass  # Continue without icon if there's an error
 
         # Load saved configuration
+        self.load_or_create_skus() # Load SKUs before building UI
         self.load_config()
 
         # Create main container frame for the UI
@@ -493,8 +1014,22 @@ class PlatypusApp:
         
         # Create UI sections in the controls frame
         self.create_connection_section()
-        self.create_bmc_operations_section()
-        self.create_flashing_operations_section()
+        
+        # --- Create Main Tab View ---
+        self.main_tab_view = ctk.CTkTabview(self.controls_frame)
+        self.main_tab_view.pack(fill="x", expand=False, padx=0, pady=5)
+        
+        self.main_tab_view.add("BMC Flashing")
+        self.main_tab_view.add("FRU Data Flasher")
+        
+        # Get tab frames
+        self.bmc_flashing_tab = self.main_tab_view.tab("BMC Flashing")
+        self.fru_data_flasher_tab = self.main_tab_view.tab("FRU Data Flasher")
+        
+        # Populate tabs
+        self.create_main_flashing_tab(self.bmc_flashing_tab)
+        self.create_dmi_flasher_tab(self.fru_data_flasher_tab)
+        
         self.create_log_section()
         self.create_progress_section()
         
@@ -665,8 +1200,15 @@ class PlatypusApp:
         self.last_flash_all_folder = ""
         self.last_flash_all_fip = ""
         self.last_flash_all_eeprom = ""
+        self.last_flash_all_do_fru = True # For the checkbox
+        
+        # --- DMI Flasher Variables ---
+        self.fru_sku = ctk.StringVar()
+        self.fru_asmid = ctk.StringVar()
+        self.fru_mfg = ctk.StringVar(value="Simply NUC")
+        self.sku_list = [] # Will be populated by load_or_create_skus
 
-    def execute_flash_all(self, firmware_folder, fip_file, eeprom_file=None, bmc_type=2):
+    def execute_flash_all(self, firmware_folder, fip_file, eeprom_file=None, bmc_type=2, do_flash_fru=True):
         """
         Execute the complete flash all sequence using the provided files.
         This method should be called from the FlashAllWindow.
@@ -676,8 +1218,8 @@ class PlatypusApp:
         self.log_message("=" * 50)
         self.lock_buttons = True
         
-        # Determine total steps based on BMC type
-        total_steps = 5 if (bmc_type != 1 and eeprom_file) else 4
+        # Determine total steps based on BMC type and if FRU flash is requested
+        total_steps = 5 if (bmc_type != 1 and eeprom_file and do_flash_fru) else 4
         current_step = 0
         
         # Step names for better logging
@@ -781,8 +1323,8 @@ class PlatypusApp:
                 self.serial_device.get()
             ))
             
-            # Step 5: Flash EEPROM (if needed)
-            if bmc_type != 1 and eeprom_file:
+            # Step 5: Flash EEPROM (if needed and requested)
+            if bmc_type != 1 and eeprom_file and do_flash_fru:
                 current_step = 5
                 step_name = step_names[current_step]
                 self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
@@ -798,6 +1340,8 @@ class PlatypusApp:
                     self.log_message, 
                     self.serial_device.get()
                 ))
+            elif bmc_type != 1:
+                self.log_message(f"\n[STEP 5/{total_steps}] Skipping EEPROM Flash (as requested).")
             
             # Complete - set progress to 100%
             self.update_progress(1.0)
@@ -830,7 +1374,44 @@ class PlatypusApp:
         self.create_log_section()
         self.create_progress_section()
 
+    def load_or_create_skus(self):
+        """Loads SKUs from dmi_skus.json or creates it with defaults."""
         
+        # Define the default list of SKUs
+        default_skus = [
+            "EE3000", "EE3100", "EE3200", "EE2000",
+            "EE2100", "EE2200", "EE1130", "EE1150",
+            "EE1170", "EE2300"
+        ]
+        
+        try:
+            if not os.path.exists(self.SKU_CONFIG_FILE):
+                self.log_message(f"SKU config not found. Creating {self.SKU_CONFIG_FILE}...")
+                with open(self.SKU_CONFIG_FILE, 'w') as f:
+                    json.dump({"skus": default_skus}, f, indent=2)
+                self.sku_list = default_skus
+            else:
+                with open(self.SKU_CONFIG_FILE, 'r') as f:
+                    data = json.load(f)
+                    loaded_skus = data.get("skus", default_skus)
+                
+                # --- MIGRATION LOGIC ---
+                # Check if any loaded SKU contains a dash, indicating an old format
+                if any('-' in sku for sku in loaded_skus):
+                    self.log_message("Old SKU format detected. Migrating to new format...")
+                    self.sku_list = default_skus
+                    # Overwrite the old file with the new format
+                    with open(self.SKU_CONFIG_FILE, 'w') as f:
+                        json.dump({"skus": default_skus}, f, indent=2)
+                    self.log_message(f"Updated {self.SKU_CONFIG_FILE} with new SKU list.")
+                else:
+                    # No migration needed, use the loaded list
+                    self.sku_list = loaded_skus
+                    
+        except Exception as e:
+            self.log_message(f"Error loading SKU config: {e}. Using defaults.")
+            self.sku_list = default_skus
+            
     def load_config(self):
         """Load saved configuration from file"""
         try:
@@ -852,6 +1433,13 @@ class PlatypusApp:
                         self.last_flash_all_folder = config.get("last_flash_all_folder", "")
                         self.last_flash_all_fip = config.get("last_flash_all_fip", "")
                         self.last_flash_all_eeprom = config.get("last_flash_all_eeprom", "")
+                        self.last_flash_all_do_fru = config.get("last_flash_all_do_fru", True)
+                        
+                        # --- Load DMI Flasher Config ---
+                        self.fru_sku.set(config.get("last_sku", ""))
+                        self.fru_asmid.set(config.get("last_asmid", ""))
+                        self.fru_mfg.set(config.get("last_mfg", "Simply NUC"))
+                        
                     except json.JSONDecodeError:
                         print(f"Warning: Config file {self.CONFIG_FILE} is not valid JSON. Using default values.")
                         self.save_config()
@@ -940,7 +1528,13 @@ class PlatypusApp:
             # Save Flash All specific paths
             "last_flash_all_folder": getattr(self, 'last_flash_all_folder', ""),
             "last_flash_all_fip": getattr(self, 'last_flash_all_fip', ""),
-            "last_flash_all_eeprom": getattr(self, 'last_flash_all_eeprom', "")
+            "last_flash_all_eeprom": getattr(self, 'last_flash_all_eeprom', ""),
+            "last_flash_all_do_fru": getattr(self, 'last_flash_all_do_fru', True),
+            
+            # --- Save DMI Flasher Config ---
+            "last_sku": self.fru_sku.get(),
+            "last_asmid": self.fru_asmid.get(),
+            "last_mfg": self.fru_mfg.get(),
         }
         try:
             with open(self.CONFIG_FILE, 'w') as config_file:
@@ -968,6 +1562,9 @@ class PlatypusApp:
         self.cleanup_minicom_processes()
         self.force_close_port_80()
         self.cleanup_zombie_processes()
+        
+        # Stop DMI server if running
+        stop_server_dmi(self.log_message)
         
         # Save configuration
         self.save_config()
@@ -1047,9 +1644,20 @@ class PlatypusApp:
         ctk.CTkRadioButton(type_frame, text="MOS BMC", variable=self.bmc_type, value=1).pack(side="left", padx=10)
         ctk.CTkRadioButton(type_frame, text="Nano BMC", variable=self.bmc_type, value=2).pack(side="left")
 
-    def create_bmc_operations_section(self):
+    def create_main_flashing_tab(self, tab_frame):
+        """Populates the main BMC Flashing tab with operations."""
+        # We pass tab_frame to the original create methods
+        self.create_bmc_operations_section(tab_frame)
+        self.create_flashing_operations_section(tab_frame)
+
+    def create_dmi_flasher_tab(self, tab_frame):
+        """Creates the FRU Data Flasher tab."""
+        # Directly populate the tab_frame, no sub-tabs needed
+        self.create_fru_flash_sub_tab(tab_frame)
+
+    def create_bmc_operations_section(self, parent_frame):
         """Create the BMC operations section with hyperlink to Web UI"""
-        section = ctk.CTkFrame(self.controls_frame)
+        section = ctk.CTkFrame(parent_frame)
         section.pack(fill="x", pady=5)
         
         # Title frame with Web UI hyperlink
@@ -1108,9 +1716,9 @@ class PlatypusApp:
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
 
-    def create_flashing_operations_section(self):
+    def create_flashing_operations_section(self, parent_frame):
         """Create the flashing operations section with optimized spacing"""
-        section = ctk.CTkFrame(self.controls_frame)
+        section = ctk.CTkFrame(parent_frame)
         section.pack(fill="x", pady=5)
         
         ctk.CTkLabel(section, text="Flashing Operations", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
@@ -1139,6 +1747,28 @@ class PlatypusApp:
                             text_color="white", font=ctk.CTkFont(weight="bold"))
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
+
+    def create_fru_flash_sub_tab(self, tab):
+        """Create the UI for the FRU Flash sub-tab."""
+        ctk.CTkLabel(tab, text="Enter FRU data to flash using FRU_flash_v2.sh", font=ctk.CTkFont(size=12)).pack(pady=5)
+
+        info_frame = ctk.CTkFrame(tab)
+        info_frame.pack(fill="x", padx=10, pady=5)
+
+        ctk.CTkLabel(info_frame, text="SKU:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        # Replace CTkEntry with CTkComboBox
+        self.sku_dropdown = ctk.CTkComboBox(info_frame, variable=self.fru_sku, values=self.sku_list, width=300)
+        self.sku_dropdown.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        
+        ctk.CTkLabel(info_frame, text="ASMID:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        ctk.CTkEntry(info_frame, textvariable=self.fru_asmid, width=300).grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        
+        ctk.CTkLabel(info_frame, text="MFG:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
+        ctk.CTkEntry(info_frame, textvariable=self.fru_mfg, width=300).grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        
+        info_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkButton(tab, text="Flash FRU Data", command=self.flash_fru).pack(pady=10)
 
     def create_log_section(self):
         """Create the log section with reduced height"""
@@ -1588,9 +2218,18 @@ class PlatypusApp:
                 return False
         
         # Start thread for operation
-        threading.Thread(target=operation_func, daemon=True).start()
+        self.lock_buttons = True # Lock buttons here
+        threading.Thread(target=self.run_async_operation, args=(operation_func,), daemon=True).start()
         return True
     
+    def run_async_operation(self, operation_func):
+        """Wrapper to run the async operation and unlock buttons"""
+        try:
+            asyncio.run(operation_func())
+        except Exception as e:
+            self.log_message(f"Fatal error in operation: {e}")
+        finally:
+            self.lock_buttons = False
 
     def force_close_port_80(self):
         """
@@ -1644,11 +2283,47 @@ class PlatypusApp:
         # Give a brief pause to ensure processes are fully terminated
         time.sleep(1)
     
+    # --- DMI Flasher Operations ---
+
+    def flash_fru(self):
+        """Prepares and runs the FRU flashing operation."""
+        required = {
+            "Serial Device": self.serial_device.get(),
+            "Host IP": self.your_ip.get(),
+            "SKU": self.fru_sku.get(),
+            "ASMID": self.fru_asmid.get(),
+            "MFG": self.fru_mfg.get(),
+        }
+        if not self._run_operation(
+            self.run_flash_fru,
+            required_fields=required,
+            error_msg="Please fill in all connection and FRU fields."
+        ):
+            return # Validation failed
+            
+    async def run_flash_fru(self):
+        """The async task for flashing FRU."""
+        self.log_message("--- Starting FRU Flash ---")
+        sku = self.fru_sku.get()
+        asmid = self.fru_asmid.get()
+        mfg = self.fru_mfg.get()
+        
+        # Construct the arguments for the shell script
+        # Quote the mfg string to handle spaces
+        script_args = f'--sku {sku} --asmid {asmid} --mfg "{mfg}"'
+        
+        await transfer_and_run_script(
+            serial_device=self.serial_device.get(),
+            host_ip=self.your_ip.get(),
+            script_content=FRU_FLASH_SCRIPT_CONTENT,
+            script_name="FRU_flash_v2.sh",
+            script_args=script_args,
+            callback_output=self.log_message,
+            callback_progress=self.update_progress
+        )
+        self.log_message("--- FRU Flash Finished ---")
+
     # BMC OPERATIONS
-
-
-
-
     
     def update_bmc(self):
         """Update BMC firmware"""
@@ -1663,7 +2338,7 @@ class PlatypusApp:
             error_msg="Please enter all required fields: Username, Password, BMC IP"
         )
 
-    def run_update_bmc(self):
+    async def run_update_bmc(self):
         """Run BMC update operation"""
         try:
             # Select firmware file with specific filter
@@ -1683,14 +2358,14 @@ class PlatypusApp:
                 fw_content = fw_file.read()
                 self.log_message("Starting BMC Update...")
 
-                asyncio.run(bmc.bmc_update(
+                await bmc.bmc_update(
                     self.username.get(),
                     self.password.get(),
                     self.bmc_ip.get(),
                     fw_content,
                     self.update_progress,
                     self.log_message,
-                ))
+                )
         except Exception as e:
             self.log_message(f"Error during BMC update: {e}")
         finally:
@@ -1710,15 +2385,15 @@ class PlatypusApp:
         ):
             self.log_message("Attempting to log in to BMC...")
 
-    def run_login_to_bmc(self):
+    async def run_login_to_bmc(self):
         """Run BMC login operation"""
         try:
-            response = asyncio.run(login(
+            response = await login(
                 self.username.get(), 
                 self.password.get(), 
                 self.serial_device.get(),
                 self.log_message
-            ))
+            )
 
             if response is None:
                 self.log_message("Error: No response received during BMC login.")
@@ -1749,15 +2424,15 @@ class PlatypusApp:
             if hasattr(self, 'open_web_ui_button'):
                 self.open_web_ui_button.configure(state="normal")
 
-    def run_set_bmc_ip(self):
+    async def run_set_bmc_ip(self):
         """Run set BMC IP operation"""
         try:
-            asyncio.run(set_ip(
+            await set_ip(
                 self.bmc_ip.get(), 
                 self.update_progress, 
                 self.log_message, 
                 self.serial_device.get()
-            ))
+            )
         except Exception as e:
             self.log_message(f"Error during IP setup: {e}")
         finally:
@@ -1773,13 +2448,13 @@ class PlatypusApp:
         ):
             self.log_message("Sending power on command to host...")
 
-    def run_power_on_host(self):
+    async def run_power_on_host(self):
         """Run power on host operation"""
         try:
-            asyncio.run(bmc.power_host(
+            await bmc.power_host(
                 self.log_message, 
                 self.serial_device.get()
-            ))
+            )
         except Exception as e:
             self.log_message(f"Error powering on host: {e}")
         finally:
@@ -1795,13 +2470,13 @@ class PlatypusApp:
         ):
             self.log_message("Sending reboot command to BMC...")
 
-    def run_reboot_bmc(self):
+    async def run_reboot_bmc(self):
         """Run reboot BMC operation"""
         try:
-            asyncio.run(bmc.reboot_bmc(
+            await bmc.reboot_bmc(
                 self.log_message, 
                 self.serial_device.get()
-            ))
+            )
         except Exception as e:
             self.log_message(f"Error rebooting BMC: {e}")
         finally:
@@ -1817,13 +2492,13 @@ class PlatypusApp:
         ):
             self.log_message("Sending factory reset command to BMC...")
 
-    def run_factory_reset(self):
+    async def run_factory_reset(self):
         """Run factory reset operation"""
         try:
-            asyncio.run(bmc.bmc_factory_reset(
+            await bmc.bmc_factory_reset(
                 self.log_message, 
                 self.serial_device.get()
-            ))
+            )
         except Exception as e:
             self.log_message(f"Error during factory reset: {e}")
         finally:
@@ -1844,7 +2519,7 @@ class PlatypusApp:
         ):
             self.log_message("Starting U-Boot flashing operation...")
 
-    def run_flash_u_boot(self):
+    async def run_flash_u_boot(self):
             """Run flash U-Boot operation with strict filename validation"""
             try:
                 # Select FIP file with specific filter
@@ -1893,13 +2568,13 @@ class PlatypusApp:
                 self.log_message(f"File path: {file_path}")
                 
                 # Run the flashing process
-                asyncio.run(bmc.flasher(
+                await bmc.flasher(
                     self.flash_file, 
                     self.your_ip.get(), 
                     self.update_progress, 
                     self.log_message, 
                     self.serial_device.get()
-                ))
+                )
             except Exception as e:
                 self.log_message(f"Error during FIP flashing: {e}")
             finally:
@@ -1933,7 +2608,7 @@ class PlatypusApp:
             self.operation_running = True
             self.log_message("Starting eMMC flashing process...")
 
-    def run_flash_emmc(self):
+    async def run_flash_emmc(self):
         """Run flash eMMC operation"""
         try:
             # First, clean up any existing servers
@@ -1959,7 +2634,7 @@ class PlatypusApp:
             self.save_config()
 
             # Continue with flashing process - ADD serial_device parameter
-            asyncio.run(bmc.flash_emmc(
+            await bmc.flash_emmc(
                 self.bmc_ip.get(),
                 firmware_directory,
                 self.your_ip.get(),
@@ -1967,7 +2642,7 @@ class PlatypusApp:
                 self.update_progress,
                 self.log_message,
                 self.serial_device.get()  # ADD THIS LINE
-            ))
+            )
         except Exception as e:
             self.log_message(f"Error during eMMC flashing: {e}")
             # Cleanup on error
@@ -1984,10 +2659,10 @@ class PlatypusApp:
         ):
             self.log_message("Sending reset command to BMC...")
 
-    def run_reset_bmc(self):
+    async def run_reset_bmc(self):
         """Run reset BMC operation"""
         try:
-            asyncio.run(bmc.reset_uboot(self.log_message))
+            await bmc.reset_uboot(self.log_message)
         except Exception as e:
             self.log_message(f"Error resetting BMC: {e}")
         finally:
@@ -2006,7 +2681,7 @@ class PlatypusApp:
         ):
             self.log_message("Starting EEPROM flashing operation...")
 
-    def run_flash_eeprom(self):
+    async def run_flash_eeprom(self):
         """Run flash EEPROM operation with strict filename validation"""
         try:
             # Select EEPROM file with specific filter
@@ -2052,13 +2727,13 @@ class PlatypusApp:
             self.log_message(f"File path: {file_path}")
             
             # Run the flashing process
-            asyncio.run(bmc.flash_eeprom(
+            await bmc.flash_eeprom(
                 self.flash_file, 
                 self.your_ip.get(), 
                 self.update_progress, 
                 self.log_message, 
                 self.serial_device.get()
-            ))
+            )
         except Exception as e:
             self.log_message(f"Error during EEPROM flashing: {e}")
         finally:
@@ -2093,7 +2768,7 @@ class PlatypusApp:
             error_msg="Please enter all required fields: Username, Password, BMC IP"
         )
 
-    def run_update_bios(self):
+    async def run_update_bios(self):
         """Run BIOS update operation"""
         try:
             # Select firmware file with specific filter
@@ -2125,14 +2800,14 @@ class PlatypusApp:
                 fw_content = fw_file.read()
                 self.log_message("Uploading BIOS firmware image (tar.gz) to BMC...")
 
-                asyncio.run(bmc.bios_update(
+                await bmc.bios_update(
                     self.username.get(),
                     self.password.get(),
                     self.bmc_ip.get(),
                     fw_content,
                     self.update_progress,
                     self.log_message,
-                ))
+                )
         except Exception as e:
             self.log_message(f"Error during BIOS update: {e}")
         finally:
@@ -2148,11 +2823,11 @@ class PlatypusApp:
         ):
             self.log_message("Sending reboot to U-Boot command...")
 
-    def run_reboot_to_bootloader(self):
+    async def run_reboot_to_bootloader(self):
         """Run reboot to U-Boot bootloader operation for OpenBMC"""
         try:
             # Call the OpenBMC-specific reset to U-Boot function
-            asyncio.run(bmc.reset_to_uboot(self.log_message, self.serial_device.get()))
+            await bmc.reset_to_uboot(self.log_message, self.serial_device.get())
             
             # Inform user about U-Boot interaction
             self.log_message("System should now be at the U-Boot prompt")
@@ -2434,15 +3109,15 @@ class PlatypusApp:
         # Launch Firefox in background thread
         threading.Thread(target=launch_snap_firefox, daemon=True).start()
 
-    def run_set_bmc_ip(self):
+    async def run_set_bmc_ip(self):
         """Run set BMC IP operation with Web UI hyperlink update"""
         try:
-            asyncio.run(set_ip(
+            await set_ip(
                 self.bmc_ip.get(), 
                 self.update_progress, 
                 self.log_message, 
                 self.serial_device.get()
-            ))
+            )
             
             # Add notification about Web UI after IP is set
             self.log_message(f"IP set successfully to {self.bmc_ip.get()}")
