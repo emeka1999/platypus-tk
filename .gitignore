@@ -1,0 +1,13 @@
+__pycache__/
+
+
+# PyInstaller
+*.spec
+*.bin
+/build/
+/dist/
+Dockerfile
+docker-compose.yml
+/venv/
+
+
