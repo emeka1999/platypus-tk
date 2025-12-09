@@ -1667,8 +1667,7 @@ class PlatypusApp:
         op_frame.pack(fill="x", padx=10)
         
         ops = [
-            ("Update BMC", self.update_bmc),
-            ("Update BIOS", self.update_bios),
+            ("Update BMC/BIOS", self.update_bios),
             ("Login to BMC", self.login_to_bmc),
             ("Set BMC IP", self.set_bmc_ip),
             ("Power ON Host", self.power_on_host),
@@ -2291,51 +2290,6 @@ class PlatypusApp:
 
     # BMC OPERATIONS
     
-    def update_bmc(self):
-        """Update BMC firmware"""
-        required = {
-            "Username": self.username.get(),
-            "Password": self.password.get(),
-            "BMC IP": self.bmc_ip.get()
-        }
-        self._run_operation(
-            self.run_update_bmc,
-            required_fields=required,
-            error_msg="Please enter all required fields: Username, Password, BMC IP"
-        )
-
-    async def run_update_bmc(self):
-        """Run BMC update operation"""
-        try:
-            # Select firmware file with specific filter
-            self.flash_file = FileSelectionHelper.select_file(
-                self.root, 
-                "Select BMC Firmware",
-                self.last_firmware_dir,
-                "BMC Firmware (*.tar.gz) | *.tar.gz"
-            )
-            
-            if not self.flash_file:
-                self.log_message("No firmware file selected.")
-                self.lock_buttons = False
-                return
-                
-            with open(self.flash_file, 'rb') as fw_file:
-                fw_content = fw_file.read()
-                self.log_message("Starting BMC Update...")
-
-                await bmc.bmc_update(
-                    self.username.get(),
-                    self.password.get(),
-                    self.bmc_ip.get(),
-                    fw_content,
-                    self.update_progress,
-                    self.log_message,
-                )
-        except Exception as e:
-            self.log_message(f"Error during BMC update: {e}")
-        finally:
-            self.lock_buttons = False
 
     def login_to_bmc(self):
         """Log in to BMC"""
@@ -2751,20 +2705,20 @@ class PlatypusApp:
                 return
                 
             # Display confirmation message due to lengthy update process
-            if not messagebox.askyesno("Confirm BIOS Update", 
-                                    "BIOS update can take up to 7 minutes and requires system restart.\n\n"
+            if not messagebox.askyesno("Confirm BIOS/BMC Update", 
+                                    "If you are doing a BIOS update, it can take up to 7 minutes and requires system restart.\n\n"
                                     "During this process, do not power off the system or interrupt the update.\n\n"
                                     "Do you want to continue?"):
-                self.log_message("BIOS update cancelled by user.")
+                self.log_message("BIOS/BMC update cancelled by user.")
                 self.lock_buttons = False
                 return
             
-            self.log_message("BIOS update started. This will take approximately 7 minutes.")
+            self.log_message("If you are doing a BIOS update, it can take up to 7 minutes.")
             self.log_message("WARNING: Do NOT interrupt the power during this process!")
                 
             with open(self.flash_file, 'rb') as fw_file:
                 fw_content = fw_file.read()
-                self.log_message("Uploading BIOS firmware image (tar.gz) to BMC...")
+                self.log_message("Uploading BIOS/BMC firmware image (tar.gz) to BMC...")
 
                 await bmc.bios_update(
                     self.username.get(),
