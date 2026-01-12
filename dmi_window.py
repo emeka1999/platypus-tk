@@ -11,6 +11,11 @@ import tempfile
 import atexit
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 import functools # <-- Import functools
+import subprocess
+import os
+import threading
+import glob
+from tkinter import messagebox
 
 try:
     from extra import create_multi_unit_window
@@ -2339,10 +2344,7 @@ class PlatypusApp:
             error_msg="Please enter BMC IP and select a serial device"
         ):
             self.log_message(f"Setting BMC IP to {self.bmc_ip.get()}...")
-            
-            # Enable the Web UI button when IP is being set
-            if hasattr(self, 'open_web_ui_button'):
-                self.open_web_ui_button.configure(state="normal")
+
 
     async def run_set_bmc_ip(self):
         """Run set BMC IP operation"""
@@ -2780,46 +2782,9 @@ class PlatypusApp:
         self.embedded_console.clear()
         self.log_message("Console cleared")
 
-    def auto_connect_console(self):
-        """Automatically connect to the console if a device is selected"""
-        if self.serial_device.get():
-            self.connect_console()
-        else:
-            # Try again in a second if no device is selected yet
-            self.root.after(1000, self.auto_connect_console)
 
-    def update_webui_link(self, ip_address):
-        """Update the Web UI hyperlink with the current IP address"""
-        # Hide the status label
-        self.webui_status_label.pack_forget()
         
-        # Update the hyperlink text and show it
-        self.webui_link.configure(text=f"Open Web UI (https://{ip_address})")
-        self.webui_link.pack(side="right")
 
-    def open_web_ui(self, event=None):
-        """Open BMC Web UI in Firefox (Snap version with lock cleanup)"""
-        if not self.bmc_ip.get():
-            self.log_message("Error: BMC IP is not set. Please set the IP first.")
-            return
-        
-        # Format the URL with https prefix
-        bmc_url = f"https://{self.bmc_ip.get()}"
-        self.log_message(f"Opening BMC Web UI in Firefox (Snap): {bmc_url}")
-        
-        # Copy to clipboard for convenience
-        try:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(bmc_url)
-            self.log_message("URL copied to clipboard as backup")
-        except Exception:
-            pass
-        
-        import subprocess
-        import os
-        import threading
-        import glob
-        from tkinter import messagebox
         
         def get_real_user():
             """Get the real user who launched the app (when running as root)"""
