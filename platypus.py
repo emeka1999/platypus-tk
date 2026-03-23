@@ -16,6 +16,7 @@ import os
 import threading
 import glob
 from tkinter import messagebox
+from tkinter import filedialog
 
 try:
     from extra import create_multi_unit_window
@@ -502,191 +503,127 @@ async def transfer_and_run_script(
 
 class FileSelectionHelper:
     """Helper class to standardize and simplify file/directory selection dialogs"""
-    
+
+    @staticmethod
+    def _default_dir(last_dir):
+        """Return last_dir if valid, otherwise default to /home"""
+        if last_dir and os.path.isdir(last_dir):
+            return last_dir
+        home = os.path.expanduser("~")
+        if home == "/root" or not os.path.isdir(home):
+            return "/home"
+        return home
+
     @staticmethod
     def select_file(parent, title, last_dir, file_filter=None):
-        """Generic file selection with fallbacks for platform compatibility"""
-        file_path = ""
-        
-        # Try zenity first with proper file filter formatting
-        try:
-            filter_params = []
-            if file_filter:
-                # Convert our filter format to zenity format
-                # Example: "Binary files (*.bin) | *.bin" -> "*.bin"
-                if '|' in file_filter:
-                    zenity_filter = file_filter.split('|')[-1].strip()
-                else:
-                    zenity_filter = file_filter
-                filter_params = ['--file-filter', zenity_filter]
-                
-            result = subprocess.run(
-                ['zenity', '--file-selection', f'--filename={last_dir}/', 
-                 f'--title={title}'] + filter_params,
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                file_path = result.stdout.strip()
-        except (subprocess.SubprocessError, FileNotFoundError):
-            # Try kdialog next with proper filter formatting
-            try:
-                if file_filter:
-                    # Convert our filter to kdialog format
-                    if '|' in file_filter:
-                        # Extract the pattern part after |
-                        pattern = file_filter.split('|')[-1].strip()
-                        # KDialog expects format like "*.bin *.tar.gz"
-                        kdialog_filter = pattern
-                    else:
-                        kdialog_filter = file_filter
-                else:
-                    kdialog_filter = '*'
-                    
-                result = subprocess.run(
-                    ['kdialog', '--getopenfilename', last_dir, kdialog_filter],
-                    capture_output=True, text=True
-                )
-                if result.returncode == 0:
-                    file_path = result.stdout.strip()
-            except (subprocess.SubprocessError, FileNotFoundError):
-                # Fall back to a simple CustomTkinter dialog
-                file_path = FileSelectionHelper._show_entry_dialog(
-                    parent, title, last_dir, f"Enter the full path to {title.lower()}:", file_filter
-                )
-                
-        return file_path
-        
+        """File selection using tkinter dialog"""
+        filetypes = []
+        if file_filter:
+            if '|' in file_filter:
+                label = file_filter.split('|')[0].strip()
+                pattern = file_filter.split('|')[1].strip()
+                filetypes = [(label, pattern), ("All files", "*.*")]
+            else:
+                filetypes = [("Files", file_filter), ("All files", "*.*")]
+        else:
+            filetypes = [("All files", "*.*")]
+
+        parent.update_idletasks()
+        parent.lift()
+
+        file_path = filedialog.askopenfilename(
+            parent=parent,
+            title=title,
+            initialdir=FileSelectionHelper._default_dir(last_dir),
+            filetypes=filetypes
+        )
+        return file_path or ""
+
     @staticmethod
     def select_directory(parent, title, last_dir):
-        """Generic directory selection with fallbacks for platform compatibility"""
-        directory = ""
-        
-        # Try zenity first (removed timeout)
-        try:
-            result = subprocess.run(
-                ['zenity', '--file-selection', '--directory', 
-                 f'--filename={last_dir}/', f'--title={title}'],
-                capture_output=True, text=True
-                # Removed timeout=10 to allow unlimited time for selection
-            )
-            if result.returncode == 0:
-                directory = result.stdout.strip()
-        except (subprocess.SubprocessError, FileNotFoundError):
-            # Try kdialog next (removed timeout)
-            try:
-                result = subprocess.run(
-                    ['kdialog', '--getexistingdirectory', last_dir, title],
-                    capture_output=True, text=True
-                    # Removed timeout=10 to allow unlimited time for selection
-                )
-                if result.returncode == 0:
-                    directory = result.stdout.strip()
-            except (subprocess.SubprocessError, FileNotFoundError):
-                # Fall back to a simple CustomTkinter dialog
-                directory = FileSelectionHelper._show_entry_dialog(
-                    parent, title, last_dir, "Enter the full path to directory:"
-                )
-                
-        return directory
-        
+        """Directory selection using tkinter dialog"""
+        parent.update_idletasks()
+        parent.lift()
+
+        directory = filedialog.askdirectory(
+            parent=parent,
+            title=title,
+            initialdir=FileSelectionHelper._default_dir(last_dir),
+        )
+        return directory or ""
+
     @staticmethod
     def _show_entry_dialog(parent, title, default_value, message, file_filter=None):
-        """Helper method to show a simple input dialog with better UX"""
+        """Fallback manual path entry dialog"""
         dialog = ctk.CTkToplevel(parent)
         dialog.title(title)
-        dialog.geometry("600x200")  # Made slightly larger
+        dialog.geometry("600x200")
         dialog.attributes('-topmost', True)
-        
-        # Make dialog resizable
         dialog.resizable(True, True)
-        
+
         path_var = ctk.StringVar(value=default_value)
-        
-        # Add some padding and better layout
+
         main_frame = ctk.CTkFrame(dialog)
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
-        
-        # Show file filter info if provided
-        if file_filter:
-            filter_info = f"{message}\n\nExpected file type: {file_filter}"
-        else:
-            filter_info = message
-            
+
+        filter_info = f"{message}\n\nExpected file type: {file_filter}" if file_filter else message
         ctk.CTkLabel(main_frame, text=filter_info, wraplength=500).pack(pady=10)
-        
-        # Entry with better visibility
+
         entry = ctk.CTkEntry(main_frame, textvariable=path_var, width=500, height=32)
         entry.pack(pady=10, fill="x")
-        entry.focus_set()  # Focus on the entry field
-        
-        # Add browse button for convenience
+        entry.focus_set()
+
         browse_frame = ctk.CTkFrame(main_frame)
         browse_frame.pack(fill="x", pady=5)
-        
+
         def browse_for_path():
-            """Allow user to browse instead of typing path"""
-            try:
-                if "directory" in message.lower():
-                    # Use a simple directory browser
-                    result = subprocess.run(
-                        ['zenity', '--file-selection', '--directory', f'--title=Browse for {title}'],
-                        capture_output=True, text=True
-                    )
-                    if result.returncode == 0:
-                        path_var.set(result.stdout.strip())
-                else:
-                    # Use a simple file browser with filter if available
-                    cmd = ['zenity', '--file-selection', f'--title=Browse for {title}']
-                    if file_filter and '|' in file_filter:
-                        pattern = file_filter.split('|')[-1].strip()
-                        cmd.extend(['--file-filter', pattern])
-                    
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    if result.returncode == 0:
-                        path_var.set(result.stdout.strip())
-            except:
-                pass  # Ignore if zenity not available
-        
+            parent.update_idletasks()
+            parent.lift()
+            if "directory" in message.lower():
+                result = filedialog.askdirectory(title=f"Browse for {title}",
+                                                 initialdir=FileSelectionHelper._default_dir(default_value))
+                if result:
+                    path_var.set(result)
+            else:
+                result = filedialog.askopenfilename(title=f"Browse for {title}",
+                                                    initialdir=FileSelectionHelper._default_dir(default_value))
+                if result:
+                    path_var.set(result)
+
         ctk.CTkButton(browse_frame, text="Browse...", command=browse_for_path, width=100).pack(side="right")
-        
-        result_path = []  # Use a list to store the result
-        
+
+        result_path = []
+
         def on_ok():
             path = path_var.get().strip()
             if path and (os.path.exists(path) or "Enter the full path" in message):
                 result_path.append(path)
                 dialog.destroy()
             else:
-                # Show error message
                 error_label = ctk.CTkLabel(main_frame, text="⚠️ Path does not exist!", text_color="red")
                 error_label.pack(pady=5)
-                dialog.after(3000, error_label.destroy)  # Remove error after 3 seconds
-        
+                dialog.after(3000, error_label.destroy)
+
         def on_cancel():
             dialog.destroy()
-        
-        # Handle Enter key
-        def on_enter(event):
-            on_ok()
-        
-        entry.bind('<Return>', on_enter)
-        
+
+        entry.bind('<Return>', lambda e: on_ok())
+
         button_frame = ctk.CTkFrame(main_frame)
         button_frame.pack(fill="x", pady=10)
         ctk.CTkButton(button_frame, text="OK", command=on_ok, width=100).pack(side="left", padx=20)
         ctk.CTkButton(button_frame, text="Cancel", command=on_cancel, width=100).pack(side="right", padx=20)
-        
-        # Center the dialog
+
         dialog.update_idletasks()
         width = dialog.winfo_width()
         height = dialog.winfo_height()
         x = (dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (dialog.winfo_screenheight() // 2) - (height // 2)
         dialog.geometry(f'{width}x{height}+{x}+{y}')
-        
-        dialog.grab_set()  # Make dialog modal
-        dialog.wait_window()  # Wait for dialog to close
-        
+
+        dialog.grab_set()
+        dialog.wait_window()
+
         return result_path[0] if result_path else ""
 
 class FlashAllWindow(ctk.CTkToplevel):
