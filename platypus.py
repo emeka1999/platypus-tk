@@ -24,7 +24,11 @@ try:
 except ImportError:
     MULTI_UNIT_AVAILABLE = False
     print("Multi-unit functionality not available (extra.py not found)")
+<<<<<<< HEAD
 VERSION = "6.1.2"  
+=======
+VERSION = "6.1.1"  
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
 # --- Embedded DMI Scripts ---
 
 # FRU_flash_v2.sh content
@@ -262,7 +266,11 @@ fi
 
 echo_BMC "Done, checksums were validated successfully."
 """
+<<<<<<< HEAD
 stop_event = threading.Event()
+=======
+
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
 # --- Global HTTP Server Variable ---
 http_server = None
 server_lock = threading.Lock()
@@ -505,6 +513,7 @@ class FileSelectionHelper:
     """Helper class to standardize and simplify file/directory selection dialogs"""
 
     @staticmethod
+<<<<<<< HEAD
     def get_real_home():
         """Gets the actual user's home directory, even if running under sudo"""
         import pwd
@@ -540,6 +549,16 @@ class FileSelectionHelper:
         if last_dir and os.path.isdir(last_dir) and last_dir != "/root":
             return last_dir
         return FileSelectionHelper.get_real_home()
+=======
+    def _default_dir(last_dir):
+        """Return last_dir if valid, otherwise default to /home"""
+        if last_dir and os.path.isdir(last_dir):
+            return last_dir
+        home = os.path.expanduser("~")
+        if home == "/root" or not os.path.isdir(home):
+            return "/home"
+        return home
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
 
     @staticmethod
     def select_file(parent, title, last_dir, file_filter=None):
@@ -588,10 +607,13 @@ class FileSelectionHelper:
         dialog.attributes('-topmost', True)
         dialog.resizable(True, True)
 
+<<<<<<< HEAD
         # Initialize to the real home if the default is empty or root
         if not default_value or default_value == "/root":
             default_value = FileSelectionHelper.get_real_home()
 
+=======
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
         path_var = ctk.StringVar(value=default_value)
 
         main_frame = ctk.CTkFrame(dialog)
@@ -610,6 +632,7 @@ class FileSelectionHelper:
         def browse_for_path():
             parent.update_idletasks()
             parent.lift()
+<<<<<<< HEAD
             initial = FileSelectionHelper._default_dir(path_var.get())
             if "directory" in message.lower():
                 result = filedialog.askdirectory(title=f"Browse for {title}", initialdir=initial)
@@ -627,6 +650,20 @@ class FileSelectionHelper:
         ctk.CTkButton(browse_frame, text="Browse...", command=browse_for_path, width=100).pack(side="right", padx=(5, 0))
         # New quick-action Home button
         ctk.CTkButton(browse_frame, text="🏠 Home", command=set_to_home, width=100, fg_color="#444444", hover_color="#666666").pack(side="right")
+=======
+            if "directory" in message.lower():
+                result = filedialog.askdirectory(title=f"Browse for {title}",
+                                                 initialdir=FileSelectionHelper._default_dir(default_value))
+                if result:
+                    path_var.set(result)
+            else:
+                result = filedialog.askopenfilename(title=f"Browse for {title}",
+                                                    initialdir=FileSelectionHelper._default_dir(default_value))
+                if result:
+                    path_var.set(result)
+
+        ctk.CTkButton(browse_frame, text="Browse...", command=browse_for_path, width=100).pack(side="right")
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
 
         result_path = []
 
@@ -820,7 +857,11 @@ class FlashAllWindow(ctk.CTkToplevel):
             allowed_fip_files = {"fip-snuc-nanobmc.bin", "fip-snuc-mos-bmc.bin"}
             
             if filename not in allowed_fip_files:
+<<<<<<< HEAD
                 self.log_message(f" Invalid FIP file: '{filename}'")
+=======
+                self.log_message(f"❌ Invalid FIP file: '{filename}'")
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
                 self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
                 
                 from tkinter import messagebox
@@ -863,7 +904,11 @@ class FlashAllWindow(ctk.CTkToplevel):
             filename = os.path.basename(file_path)
             
             if filename != "fru.bin":
+<<<<<<< HEAD
                 self.log_message(f" Invalid EEPROM file: '{filename}'")
+=======
+                self.log_message(f"❌ Invalid EEPROM file: '{filename}'")
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
                 self.log_message(f"Required file: 'fru.bin'")
                 
                 from tkinter import messagebox
@@ -958,7 +1003,11 @@ class PlatypusApp:
 
         # Create main window with specific class name
         self.root = ctk.CTk(className="PlatypusApp")  # Set class name during creation
+<<<<<<< HEAD
         self.root.title("Platypus BMC Management - 6.1.2")
+=======
+        self.root.title("Platypus BMC Management - 6.1.1")
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
         self.root.geometry("800x850")  # Adjusted to fit 1080p
         
         # Initialize variables
@@ -1185,6 +1234,7 @@ class PlatypusApp:
         self.fru_asmid = ctk.StringVar()
         self.fru_mfg = ctk.StringVar(value="Simply NUC")
         self.sku_list = [] # Will be populated by load_or_create_skus
+<<<<<<< HEAD
         # Master Home Directory
         self.user_home_dir = ""
 
@@ -1255,10 +1305,100 @@ class PlatypusApp:
 
                 # Step 2: Flash U-Boot (FIP)
                 current_step = 2
+=======
+
+    def execute_flash_all(self, firmware_folder, fip_file, eeprom_file=None, bmc_type=2, do_flash_fru=True):
+        """
+        Execute the complete flash all sequence using the provided files.
+        This method should be called from the FlashAllWindow.
+        """
+        self.log_message("=" * 50)
+        self.log_message("FLASH ALL SEQUENCE STARTED")
+        self.log_message("=" * 50)
+        self.lock_buttons = True
+        
+        # Determine total steps based on BMC type and if FRU flash is requested
+        total_steps = 5 if (bmc_type != 1 and eeprom_file and do_flash_fru) else 4
+        current_step = 0
+        
+        # Step names for better logging
+        step_names = {
+            1: "Flash eMMC",
+            2: "Login to BMC", 
+            3: "Set BMC IP",
+            4: "Flash U-Boot",
+            5: "Flash EEPROM"
+        }
+        
+        def update_overall_progress(step_progress, step_number, step_name):
+            """Update overall progress based on current step and its progress"""
+            # Each step gets equal weight in the overall progress
+            step_weight = 1.0 / total_steps
+            overall_progress = ((step_number - 1) * step_weight) + (step_progress * step_weight)
+            self.update_progress(overall_progress)
+            
+            # Log detailed progress updates
+            if step_progress == 0.0:
+                self.log_message(f"→ Starting Step {step_number}/{total_steps}: {step_name}")
+            elif step_progress == 1.0:
+                overall_percent = int(overall_progress * 100)
+                self.log_message(f"✓ Completed Step {step_number}/{total_steps}: {step_name} (Overall: {overall_percent}%)")
+            elif step_progress > 0:
+                step_percent = int(step_progress * 100)
+                overall_percent = int(overall_progress * 100)
+                if step_percent % 25 == 0 or step_percent in [10, 30, 50, 70, 90]:  # Log at key intervals
+                    self.log_message(f"  Step {step_number}: {step_percent}% | Overall: {overall_percent}%")
+        
+        try:
+            # Step 1: Flash eMMC 
+            current_step = 1
+            step_name = step_names[current_step]
+            self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
+            self.log_message("-" * 30)
+            
+            def emmc_progress_callback(progress):
+                update_overall_progress(progress, current_step, step_name)
+                
+            asyncio.run(bmc.flash_emmc2(
+                self.bmc_ip.get(), 
+                firmware_folder, 
+                self.your_ip.get(), 
+                self.bmc_type.get(), 
+                emmc_progress_callback,
+                self.log_message,
+                self.serial_device.get()
+            ))
+            self.log_message("Running FRU Flash")
+            
+
+            time.sleep(25)
+
+            # Step 2: Flash U-Boot (FIP)
+            current_step = 2
+            step_name = step_names[current_step]
+            self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
+            self.log_message("-" * 30)
+            
+            def fip_progress_callback(progress):
+                update_overall_progress(progress, current_step, step_name)
+                
+            asyncio.run(bmc.flasher(
+                fip_file, 
+                self.your_ip.get(), 
+                fip_progress_callback,
+                self.log_message, 
+                self.serial_device.get()
+            ))
+            
+            # Step 3: Flash EEPROM (if needed and requested)
+            if bmc_type != 1 and eeprom_file and do_flash_fru:
+                current_step = 5
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
                 step_name = step_names[current_step]
                 self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
                 self.log_message("-" * 30)
                 
+<<<<<<< HEAD
                 def fip_progress_callback(progress):
                     update_overall_progress(progress, current_step, step_name)
                     
@@ -1356,6 +1496,51 @@ class PlatypusApp:
                 self.update_progress(0)
             finally:
                 self.lock_buttons = False
+=======
+                def eeprom_progress_callback(progress):
+                    update_overall_progress(progress, current_step, step_name)
+                    
+                asyncio.run(bmc.flash_eeprom(
+                    eeprom_file, 
+                    self.your_ip.get(), 
+                    eeprom_progress_callback,
+                    self.log_message, 
+                    self.serial_device.get()
+                ))
+            elif bmc_type != 1:
+                self.log_message(f"\n[STEP 5/{total_steps}] Skipping EEPROM Flash (as requested).") 
+
+            try:
+                asyncio.run(bmc.reboot_bmc(
+                    self.log_message,
+                    self.serial_device.get()
+                ))
+            except Exception as reboot_err:
+                self.log_message(f"Warning: Reboot command failed: {reboot_err}")
+            
+            # Complete - set progress to 100%
+            self.update_progress(1.0)
+            self.log_message("\n" + "=" * 50)
+            self.log_message("🎉 FLASH ALL SEQUENCE COMPLETED SUCCESSFULLY!") 
+            self.log_message("=" * 50)
+            
+            # Reset progress after a brief delay
+            def reset_progress():
+                import time
+                time.sleep(3)
+                self.update_progress(0)
+            
+            import threading
+            threading.Thread(target=reset_progress, daemon=True).start()
+            
+        except Exception as e:
+            self.log_message(f"\n❌ ERROR during Flash All sequence at Step {current_step}: {str(e)}")
+            self.log_message("=" * 50)
+            # Reset progress on error
+            self.update_progress(0)
+        finally:
+            self.lock_buttons = False
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
         
     def _create_ui(self):
         """Create all UI sections with reduced vertical spacing"""
@@ -1418,7 +1603,10 @@ class PlatypusApp:
                         self.last_firmware_dir = config.get("last_firmware_dir", os.path.expanduser("~"))
                         self.last_fip_dir = config.get("last_fip_dir", os.path.expanduser("~"))
                         self.last_eeprom_dir = config.get("last_eeprom_dir", os.path.expanduser("~"))
+<<<<<<< HEAD
                         self.user_home_dir = config.get("user_home_dir", "")
+=======
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
                         
                         # Load Flash All specific paths
                         self.last_flash_all_folder = config.get("last_flash_all_folder", "")
@@ -1526,9 +1714,12 @@ class PlatypusApp:
             "last_sku": self.fru_sku.get(),
             "last_asmid": self.fru_asmid.get(),
             "last_mfg": self.fru_mfg.get(),
+<<<<<<< HEAD
 
             # Save Master home
             "user_home_dir": getattr(self, 'user_home_dir', ""),
+=======
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
         }
         try:
             with open(self.CONFIG_FILE, 'w') as config_file:
@@ -1691,8 +1882,12 @@ class PlatypusApp:
             ("Flash FRU (EEPROM)", self.flash_eeprom),
             ("Flash All", self.on_flash_all),
             ("Multi-Unit Flash", self.open_multi_unit_flash),  # NEW BUTTON
+<<<<<<< HEAD
             ("Reboot to Bootloader", self.reboot_to_bootloader),
             ("Set Home Directory", self.set_home_directory)
+=======
+            ("Reboot to Bootloader", self.reboot_to_bootloader)
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
         ]
         
         for i, (text, command) in enumerate(ops):
@@ -2027,7 +2222,11 @@ class PlatypusApp:
             
             # If no interfaces found, show error and keep current
             if not ips:
+<<<<<<< HEAD
                 self.log_message(" No network interfaces found")
+=======
+                self.log_message("❌ No network interfaces found")
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
                 return
                 
             # Update the dropdown values with all detected IPs
@@ -2053,7 +2252,11 @@ class PlatypusApp:
             self.log_message(f"Host IP dropdown updated with {len(ips)} interface(s)")
                     
         except Exception as e:
+<<<<<<< HEAD
             self.log_message(f" Error updating network interfaces: {e}")
+=======
+            self.log_message(f"❌ Error updating network interfaces: {e}")
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
             # Don't crash - just keep whatever was there before
 
     def log_message(self, message):
@@ -2073,10 +2276,13 @@ class PlatypusApp:
 
     def validate_button_click(self):
         """Check if buttons should be locked (operation in progress)"""
+<<<<<<< HEAD
         # Exception: allow clicks while BIOS/BMC update is running
         if getattr(self, 'bios_update_running', False):
             return True
 
+=======
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
         if self.lock_buttons:
             self.log_message("Another operation is in progress. Please wait...")
             return False
@@ -2128,6 +2334,10 @@ class PlatypusApp:
                         pass
         except Exception as e:
             self.log_message(f"Error cleaning minicom processes: {e}")
+<<<<<<< HEAD
+=======
+    
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
 
     def cleanup_server_processes(self):
         """Clean up any running server processes (TFTP, HTTP, etc.)"""
@@ -2454,10 +2664,17 @@ class PlatypusApp:
                 allowed_fip_files = {"fip-snuc-nanobmc.bin", "fip-snuc-mos-bmc.bin"}
                 
                 if filename not in allowed_fip_files:
+<<<<<<< HEAD
                     self.log_message(f" ERROR: Invalid FIP file selected!")
                     self.log_message(f"Selected file: '{filename}'")
                     self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
                     self.log_message(" FIP flashing ABORTED for safety!")
+=======
+                    self.log_message(f"❌ ERROR: Invalid FIP file selected!")
+                    self.log_message(f"Selected file: '{filename}'")
+                    self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
+                    self.log_message("⚠️  FIP flashing ABORTED for safety!")
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
                     
                     # Show error dialog to user
                     from tkinter import messagebox
@@ -2594,7 +2811,10 @@ class PlatypusApp:
             error_msg="Please enter Host IP and select a serial device"
         ):
             self.log_message("Starting EEPROM flashing operation...")
+<<<<<<< HEAD
     
+=======
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
 
     async def run_flash_eeprom(self):
         """Run flash EEPROM operation with strict filename validation"""
@@ -2616,10 +2836,17 @@ class PlatypusApp:
             filename = os.path.basename(file_path)
             
             if filename != "fru.bin":
+<<<<<<< HEAD
                 self.log_message(f" ERROR: Invalid EEPROM file selected!")
                 self.log_message(f"Selected file: '{filename}'")
                 self.log_message(f"Required file: 'fru.bin'")
                 self.log_message(" EEPROM flashing ABORTED for safety!")
+=======
+                self.log_message(f"❌ ERROR: Invalid EEPROM file selected!")
+                self.log_message(f"Selected file: '{filename}'")
+                self.log_message(f"Required file: 'fru.bin'")
+                self.log_message("⚠️  EEPROM flashing ABORTED for safety!")
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
                 
                 # Show error dialog to user
                 from tkinter import messagebox
@@ -2690,11 +2917,19 @@ class PlatypusApp:
                 self.root, 
                 "Select Firmware File",
                 self.last_firmware_dir,
+<<<<<<< HEAD
                 "Firmware Files (*.tar.gz) | *.tar.gz"
+=======
+                "Firmware Files (*.tar.gz *.bin *.img) | *.tar.gz;*.bin;*.img"
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
             )
             
             if not self.flash_file:
                 self.log_message("Update cancelled: No file selected.")
+<<<<<<< HEAD
+=======
+                self.lock_buttons = False
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
                 return
 
             # --- DETECTION LOGIC ---
@@ -2717,6 +2952,10 @@ class PlatypusApp:
             # Show the specific popup
             if not messagebox.askyesno(f"Confirm {update_type} Update", warning_msg):
                 self.log_message(f"{update_type} update cancelled.")
+<<<<<<< HEAD
+=======
+                self.lock_buttons = False
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
                 return
             # -----------------------
 
@@ -2737,8 +2976,12 @@ class PlatypusApp:
         except Exception as e:
             self.log_message(f"Error during update: {e}")
         finally:
+<<<<<<< HEAD
             self.bios_update_running = False
         
+=======
+            self.lock_buttons = False
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
 
     def reboot_to_bootloader(self):
         """Reboot the OpenBMC to bootloader (U-Boot)"""
@@ -2787,7 +3030,222 @@ class PlatypusApp:
         self.embedded_console.clear()
         self.log_message("Console cleared")
 
+<<<<<<< HEAD
         
+=======
+
+        
+
+        
+        def get_real_user():
+            """Get the real user who launched the app (when running as root)"""
+            real_user = None
+            
+            # Try multiple methods to get real user
+            real_user = os.environ.get('SUDO_USER') or os.environ.get('PKEXEC_UID')
+            
+            # If PKEXEC_UID is a UID, convert to username
+            if real_user and real_user.isdigit():
+                import pwd
+                try:
+                    real_user = pwd.getpwuid(int(real_user)).pw_name
+                except:
+                    real_user = None
+            
+            # If still no user, try to detect from who command
+            if not real_user:
+                try:
+                    who_output = subprocess.check_output(['who'], universal_newlines=True).strip()
+                    for line in who_output.split('\n'):
+                        if line and not line.startswith('root '):
+                            real_user = line.split()[0]
+                            break
+                except:
+                    pass
+            
+            return real_user
+        
+        def cleanup_firefox_locks(user):
+            """Clean up Firefox lock files that prevent new instances"""
+            self.log_message("Cleaning up Firefox lock files...")
+            
+            # Common Firefox profile locations for snap
+            profile_paths = [
+                f"/home/{user}/snap/firefox/common/.mozilla/firefox/",
+                f"/home/{user}/.mozilla/firefox/",
+                f"/home/{user}/snap/firefox/current/.mozilla/firefox/"
+            ]
+            
+            cleaned_files = []
+            
+            for profile_base in profile_paths:
+                try:
+                    if os.path.exists(profile_base):
+                        # Find all profile directories
+                        profile_dirs = glob.glob(os.path.join(profile_base, "*.default*"))
+                        
+                        for profile_dir in profile_dirs:
+                            # Lock files to remove
+                            lock_files = [
+                                os.path.join(profile_dir, "lock"),
+                                os.path.join(profile_dir, ".parentlock"),
+                                os.path.join(profile_dir, "parent.lock")
+                            ]
+                            
+                            for lock_file in lock_files:
+                                if os.path.exists(lock_file):
+                                    try:
+                                        # Use sudo to remove as the user
+                                        subprocess.run(
+                                            f"sudo -u {user} rm -f '{lock_file}'",
+                                            shell=True,
+                                            stdout=subprocess.DEVNULL,
+                                            stderr=subprocess.DEVNULL,
+                                            timeout=3
+                                        )
+                                        cleaned_files.append(lock_file)
+                                    except:
+                                        # Try direct removal if sudo fails
+                                        try:
+                                            os.remove(lock_file)
+                                            cleaned_files.append(lock_file)
+                                        except:
+                                            pass
+                except Exception as e:
+                    self.log_message(f"  Error cleaning {profile_base}: {e}")
+            
+            if cleaned_files:
+                self.log_message(f"✓ Removed {len(cleaned_files)} lock file(s)")
+                for file in cleaned_files:
+                    self.log_message(f"  - {file}")
+            else:
+                self.log_message("  No lock files found to clean")
+        
+        def kill_zombie_firefox_processes(user):
+            """Kill any zombie Firefox processes"""
+            self.log_message("Checking for zombie Firefox processes...")
+            
+            killed_processes = []
+            
+            try:
+                for proc in psutil.process_iter(['pid', 'name', 'username', 'status']):
+                    if (proc.info['username'] == user and 
+                        proc.info['name'] and 
+                        'firefox' in proc.info['name'].lower()):
+                        
+                        try:
+                            # Check if process is actually responsive
+                            if proc.info['status'] == psutil.STATUS_ZOMBIE:
+                                self.log_message(f"  Found zombie Firefox process: PID {proc.info['pid']}")
+                                subprocess.run(f"sudo kill -9 {proc.info['pid']}", shell=True, timeout=2)
+                                killed_processes.append(proc.info['pid'])
+                            else:
+                                # Try to send a test signal to see if it's responsive
+                                try:
+                                    os.kill(proc.info['pid'], 0)  # Test signal
+                                except ProcessLookupError:
+                                    # Process is dead but still listed
+                                    killed_processes.append(proc.info['pid'])
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+            except Exception as e:
+                self.log_message(f"  Error checking processes: {e}")
+            
+            if killed_processes:
+                self.log_message(f"✓ Killed {len(killed_processes)} zombie process(es)")
+            else:
+                self.log_message("  No zombie processes found")
+        
+        def try_snap_firefox_new_tab(url, user):
+            """Try to open new tab in existing Snap Firefox"""
+            
+            # Snap Firefox commands with new-window fallback
+            snap_commands = [
+                # Method 1: Try new-tab first
+                f"sudo -u {user} snap run firefox --new-tab --url '{url}'",
+                
+            ]
+            
+            for i, cmd in enumerate(snap_commands, 1):
+                try:
+                    method_name = (
+                        "new-tab" if "--new-tab" in cmd else
+                        "new-window" if "--new-window" in cmd else
+                        "new-instance" if "--new-instance" in cmd else
+                        "no-remote" if "--no-remote" in cmd else
+                        "direct"
+                    )
+                    
+                    self.log_message(f"Firefox method {i} ({method_name}): Trying...")
+                    
+                    result = subprocess.run(
+                        cmd,
+                        shell=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=10
+                    )
+                    
+                    if result.returncode == 0:
+                        self.log_message(f"✓ Firefox launched successfully with {method_name}")
+                        return True
+                    else:
+                        self.log_message(f"  Method {i} failed (code: {result.returncode})")
+                        
+                except subprocess.TimeoutExpired:
+                    self.log_message(f"  Method {i} timed out")
+                except Exception as e:
+                    self.log_message(f"  Method {i} error: {e}")
+                    
+            return False
+        
+        def launch_snap_firefox():
+            try:
+                # Get real user
+                real_user = get_real_user()
+                
+                if not real_user:
+                    self.log_message("❌ Could not determine real user")
+
+                    return False
+                
+                self.log_message(f"Real user: {real_user}")
+                self.log_message("Preparing Firefox launch...")
+                
+                # Step 1: Clean up lock files
+                cleanup_firefox_locks(real_user)
+                
+                # Step 2: Kill any zombie processes
+                kill_zombie_firefox_processes(real_user)
+                
+                # Step 3: Wait a moment for cleanup to complete
+                import time
+                time.sleep(1)
+                
+                # Step 4: Try to launch Firefox
+                self.log_message("Attempting to launch Firefox...")
+                
+                if try_snap_firefox_new_tab(bmc_url, real_user):
+                    self.log_message("🎉 Firefox opened successfully!")
+                    return True
+                
+                # All methods failed
+                self.log_message("❌ All Firefox launch methods failed")
+                
+                # Show helpful instructions
+
+                return False
+                    
+            except Exception as e:
+                self.log_message(f"❌ Error during Firefox launch: {e}")
+                
+
+                return False
+        
+        # Launch Firefox in background thread
+        threading.Thread(target=launch_snap_firefox, daemon=True).start()
+
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
     async def run_set_bmc_ip(self):
         """Run set BMC IP operation with Web UI hyperlink update"""
         try:
@@ -2802,10 +3260,18 @@ class PlatypusApp:
             self.log_message(f"IP set successfully to {self.bmc_ip.get()}")
             self.log_message("You can now access the BMC Web UI through your browser.")
             
+<<<<<<< HEAD
+=======
+            # Update the Web UI hyperlink
+            if hasattr(self, 'update_webui_link'):
+                self.update_webui_link(self.bmc_ip.get())
+                
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
         except Exception as e:
             self.log_message(f"Error during IP setup: {e}")
         finally:
             self.lock_buttons = False
+<<<<<<< HEAD
 
     def set_home_directory(self):
         """Let the user explicitly set the base directory for all file dialogs."""
@@ -2830,6 +3296,8 @@ class PlatypusApp:
             # Save the new configuration
             self.save_config()
             self.log_message(f"🏠 Master home directory updated to: {new_home}")
+=======
+>>>>>>> fe3eccc (Fedora Support & Fix dialog change)
             
 
 def main():
