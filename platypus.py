@@ -267,10 +267,14 @@ fi
 echo_BMC "Done, checksums were validated successfully."
 """
 <<<<<<< HEAD
+<<<<<<< HEAD
 stop_event = threading.Event()
 =======
 
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+stop_event = threading.Event()
+>>>>>>> 5be6ea2 (Changed File Selection helper)
 # --- Global HTTP Server Variable ---
 http_server = None
 server_lock = threading.Lock()
@@ -2335,9 +2339,12 @@ class PlatypusApp:
         except Exception as e:
             self.log_message(f"Error cleaning minicom processes: {e}")
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+>>>>>>> 5be6ea2 (Changed File Selection helper)
 
     def cleanup_server_processes(self):
         """Clean up any running server processes (TFTP, HTTP, etc.)"""
@@ -2812,9 +2819,13 @@ class PlatypusApp:
         ):
             self.log_message("Starting EEPROM flashing operation...")
 <<<<<<< HEAD
+<<<<<<< HEAD
     
 =======
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+    
+>>>>>>> 5be6ea2 (Changed File Selection helper)
 
     async def run_flash_eeprom(self):
         """Run flash EEPROM operation with strict filename validation"""
@@ -2918,10 +2929,14 @@ class PlatypusApp:
                 "Select Firmware File",
                 self.last_firmware_dir,
 <<<<<<< HEAD
+<<<<<<< HEAD
                 "Firmware Files (*.tar.gz) | *.tar.gz"
 =======
                 "Firmware Files (*.tar.gz *.bin *.img) | *.tar.gz;*.bin;*.img"
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+                "Firmware Files (*.tar.gz) | *.tar.gz"
+>>>>>>> 5be6ea2 (Changed File Selection helper)
             )
             
             if not self.flash_file:
@@ -3156,6 +3171,7 @@ class PlatypusApp:
             else:
                 self.log_message("  No zombie processes found")
         
+<<<<<<< HEAD
         def try_snap_firefox_new_tab(url, user):
             """Try to open new tab in existing Snap Firefox"""
             
@@ -3246,6 +3262,8 @@ class PlatypusApp:
         threading.Thread(target=launch_snap_firefox, daemon=True).start()
 
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+>>>>>>> 5be6ea2 (Changed File Selection helper)
     async def run_set_bmc_ip(self):
         """Run set BMC IP operation with Web UI hyperlink update"""
         try:
