@@ -1312,68 +1312,48 @@ class PlatypusApp:
 =======
 
     def execute_flash_all(self, firmware_folder, fip_file, eeprom_file=None, bmc_type=2, do_flash_fru=True):
-        """
-        Execute the complete flash all sequence using the provided files.
-        This method should be called from the FlashAllWindow.
-        """
-        self.log_message("=" * 50)
-        self.log_message("FLASH ALL SEQUENCE STARTED")
-        self.log_message("=" * 50)
-        self.lock_buttons = True
-        
-        # Determine total steps based on BMC type and if FRU flash is requested
-        total_steps = 5 if (bmc_type != 1 and eeprom_file and do_flash_fru) else 4
-        current_step = 0
-        
-        # Step names for better logging
-        step_names = {
-            1: "Flash eMMC",
-            2: "Login to BMC", 
-            3: "Set BMC IP",
-            4: "Flash U-Boot",
-            5: "Flash EEPROM"
-        }
-        
-        def update_overall_progress(step_progress, step_number, step_name):
-            """Update overall progress based on current step and its progress"""
-            # Each step gets equal weight in the overall progress
-            step_weight = 1.0 / total_steps
-            overall_progress = ((step_number - 1) * step_weight) + (step_progress * step_weight)
-            self.update_progress(overall_progress)
+            """
+            Execute the complete flash all sequence using the provided files.
+            This method should be called from the FlashAllWindow.
+            """
+            self.log_message("=" * 50)
+            self.log_message("FLASH ALL SEQUENCE STARTED")
+            self.log_message("=" * 50)
+            self.lock_buttons = True
             
-            # Log detailed progress updates
-            if step_progress == 0.0:
-                self.log_message(f"→ Starting Step {step_number}/{total_steps}: {step_name}")
-            elif step_progress == 1.0:
-                overall_percent = int(overall_progress * 100)
-                self.log_message(f"✓ Completed Step {step_number}/{total_steps}: {step_name} (Overall: {overall_percent}%)")
-            elif step_progress > 0:
-                step_percent = int(step_progress * 100)
-                overall_percent = int(overall_progress * 100)
-                if step_percent % 25 == 0 or step_percent in [10, 30, 50, 70, 90]:  # Log at key intervals
-                    self.log_message(f"  Step {step_number}: {step_percent}% | Overall: {overall_percent}%")
-        
-        try:
-            # Step 1: Flash eMMC 
-            current_step = 1
-            step_name = step_names[current_step]
-            self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
-            self.log_message("-" * 30)
+            # Determine total steps based on BMC type and if FRU flash is requested
+            total_steps = 5 if (bmc_type != 1 and eeprom_file and do_flash_fru) else 4
+            current_step = 0
             
-            def emmc_progress_callback(progress):
-                update_overall_progress(progress, current_step, step_name)
+            # Step names for better logging
+            step_names = {
+                1: "Flash eMMC",
+                2: "Login to BMC", 
+                3: "Set BMC IP",
+                4: "Flash U-Boot",
+                5: "Flash EEPROM"
+            }
+            
+            def update_overall_progress(step_progress, step_number, step_name):
+                """Update overall progress based on current step and its progress"""
+                # Each step gets equal weight in the overall progress
+                step_weight = 1.0 / total_steps
+                overall_progress = ((step_number - 1) * step_weight) + (step_progress * step_weight)
+                self.update_progress(overall_progress)
                 
-            asyncio.run(bmc.flash_emmc2(
-                self.bmc_ip.get(), 
-                firmware_folder, 
-                self.your_ip.get(), 
-                self.bmc_type.get(), 
-                emmc_progress_callback,
-                self.log_message,
-                self.serial_device.get()
-            ))
-            self.log_message("Running FRU Flash")
+                # Log detailed progress updates
+                if step_progress == 0.0:
+                    self.log_message(f"→ Starting Step {step_number}/{total_steps}: {step_name}")
+                elif step_progress == 1.0:
+                    overall_percent = int(overall_progress * 100)
+                    self.log_message(f"✓ Completed Step {step_number}/{total_steps}: {step_name} (Overall: {overall_percent}%)")
+                elif step_progress > 0:
+                    step_percent = int(step_progress * 100)
+                    overall_percent = int(overall_progress * 100)
+                    if step_percent % 25 == 0 or step_percent in [10, 30, 50, 70, 90]:  # Log at key intervals
+                        self.log_message(f"  Step {step_number}: {step_percent}% | Overall: {overall_percent}%")
             
+<<<<<<< HEAD
 
             time.sleep(25)
 
@@ -1398,10 +1378,16 @@ class PlatypusApp:
             if bmc_type != 1 and eeprom_file and do_flash_fru:
                 current_step = 5
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+            try:
+                # Step 1: Flash eMMC 
+                current_step = 1
+>>>>>>> 55881ba (Fixed FRU)
                 step_name = step_names[current_step]
                 self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
                 self.log_message("-" * 30)
                 
+<<<<<<< HEAD
 <<<<<<< HEAD
                 def fip_progress_callback(progress):
                     update_overall_progress(progress, current_step, step_name)
@@ -1502,37 +1488,126 @@ class PlatypusApp:
                 self.lock_buttons = False
 =======
                 def eeprom_progress_callback(progress):
+=======
+                def emmc_progress_callback(progress):
+>>>>>>> 55881ba (Fixed FRU)
                     update_overall_progress(progress, current_step, step_name)
                     
-                asyncio.run(bmc.flash_eeprom(
-                    eeprom_file, 
+                asyncio.run(bmc.flash_emmc2(
+                    self.bmc_ip.get(), 
+                    firmware_folder, 
                     self.your_ip.get(), 
-                    eeprom_progress_callback,
-                    self.log_message, 
-                    self.serial_device.get()
-                ))
-            elif bmc_type != 1:
-                self.log_message(f"\n[STEP 5/{total_steps}] Skipping EEPROM Flash (as requested).") 
-
-            try:
-                asyncio.run(bmc.reboot_bmc(
+                    self.bmc_type.get(), 
+                    emmc_progress_callback,
                     self.log_message,
                     self.serial_device.get()
                 ))
-            except Exception as reboot_err:
-                self.log_message(f"Warning: Reboot command failed: {reboot_err}")
-            
-            # Complete - set progress to 100%
-            self.update_progress(1.0)
-            self.log_message("\n" + "=" * 50)
-            self.log_message("🎉 FLASH ALL SEQUENCE COMPLETED SUCCESSFULLY!") 
-            self.log_message("=" * 50)
-            
-            # Reset progress after a brief delay
-            def reset_progress():
-                import time
-                time.sleep(3)
+                self.log_message("Running FRU Flash")
+                
+                time.sleep(35)
+
+                # Step 2: Flash U-Boot (FIP)
+                current_step = 2
+                step_name = step_names[current_step]
+                self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
+                self.log_message("-" * 30)
+                
+                def fip_progress_callback(progress):
+                    update_overall_progress(progress, current_step, step_name)
+                    
+                asyncio.run(bmc.flasher(
+                    fip_file, 
+                    self.your_ip.get(), 
+                    fip_progress_callback,
+                    self.log_message, 
+                    self.serial_device.get()
+                ))
+                
+                # Step 3: Flash EEPROM (if needed and requested)
+                if bmc_type != 1 and eeprom_file and do_flash_fru:
+                    
+                    # --- NEW REBOOT, LOGIN, & IP LOGIC ---
+                    self.log_message("Rebooting system before flashing EEPROM...")
+                    try:
+                        asyncio.run(bmc.reboot_bmc(
+                            self.log_message,
+                            self.serial_device.get()
+                        ))
+                    except Exception as reboot_err:
+                        self.log_message(f"Warning: Reboot command failed: {reboot_err}")
+                    
+                    self.log_message("Waiting 40 seconds for system to boot...")
+                    time.sleep(60)
+
+                    self.log_message("Logging in to prepare for EEPROM flash...")
+                    asyncio.run(login(
+                        self.username.get(), 
+                        self.password.get(), 
+                        self.serial_device.get(), 
+                        self.log_message
+                    ))
+
+                    self.log_message("Waiting 5 seconds before setting IP...")
+                    time.sleep(5)
+                    
+                    self.log_message("Setting BMC IP...")
+                    asyncio.run(set_ip(
+                        self.bmc_ip.get(), 
+                        lambda p: None, # Dummy callback to prevent progress bar jumping
+                        self.log_message, 
+                        self.serial_device.get()
+                    ))
+
+                    self.log_message("Waiting 2 seconds before initiating EEPROM flash...")
+                    time.sleep(2)
+                    # --------------------------------
+
+                    current_step = 5
+                    step_name = step_names[current_step]
+                    self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
+                    self.log_message("-" * 30)
+                    
+                    def eeprom_progress_callback(progress):
+                        update_overall_progress(progress, current_step, step_name)
+                        
+                    asyncio.run(bmc.flash_eeprom(
+                        eeprom_file, 
+                        self.your_ip.get(), 
+                        eeprom_progress_callback,
+                        self.log_message, 
+                        self.serial_device.get()
+                    ))
+                elif bmc_type != 1:
+                    self.log_message(f"\n[STEP 5/{total_steps}] Skipping EEPROM Flash (as requested).") 
+                    try:
+                        asyncio.run(bmc.reboot_bmc(
+                            self.log_message,
+                            self.serial_device.get()
+                        ))
+                    except Exception as reboot_err:
+                        self.log_message(f"Warning: Reboot command failed: {reboot_err}")
+                
+                # Complete - set progress to 100%
+                self.update_progress(1.0)
+                self.log_message("\n" + "=" * 50)
+                self.log_message(" FLASH ALL SEQUENCE COMPLETED SUCCESSFULLY!") 
+                self.log_message("=" * 50)
+                
+                # Reset progress after a brief delay
+                def reset_progress():
+                    import time
+                    time.sleep(3)
+                    self.update_progress(0)
+                
+                import threading
+                threading.Thread(target=reset_progress, daemon=True).start()
+                
+            except Exception as e:
+                self.log_message(f"\n ERROR during Flash All sequence at Step {current_step}: {str(e)}")
+                self.log_message("=" * 50)
+                # Reset progress on error
                 self.update_progress(0)
+<<<<<<< HEAD
             
             import threading
             threading.Thread(target=reset_progress, daemon=True).start()
@@ -1545,6 +1620,10 @@ class PlatypusApp:
         finally:
             self.lock_buttons = False
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+            finally:
+                self.lock_buttons = False
+>>>>>>> 55881ba (Fixed FRU)
         
     def _create_ui(self):
         """Create all UI sections with reduced vertical spacing"""
@@ -2281,12 +2360,18 @@ class PlatypusApp:
     def validate_button_click(self):
         """Check if buttons should be locked (operation in progress)"""
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 55881ba (Fixed FRU)
         # Exception: allow clicks while BIOS/BMC update is running
         if getattr(self, 'bios_update_running', False):
             return True
 
+<<<<<<< HEAD
 =======
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+>>>>>>> 55881ba (Fixed FRU)
         if self.lock_buttons:
             self.log_message("Another operation is in progress. Please wait...")
             return False
@@ -2672,6 +2757,7 @@ class PlatypusApp:
                 
                 if filename not in allowed_fip_files:
 <<<<<<< HEAD
+<<<<<<< HEAD
                     self.log_message(f" ERROR: Invalid FIP file selected!")
                     self.log_message(f"Selected file: '{filename}'")
                     self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
@@ -2682,6 +2768,12 @@ class PlatypusApp:
                     self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
                     self.log_message("⚠️  FIP flashing ABORTED for safety!")
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+                    self.log_message(f" ERROR: Invalid FIP file selected!")
+                    self.log_message(f"Selected file: '{filename}'")
+                    self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
+                    self.log_message(" FIP flashing ABORTED for safety!")
+>>>>>>> 55881ba (Fixed FRU)
                     
                     # Show error dialog to user
                     from tkinter import messagebox
@@ -2848,6 +2940,7 @@ class PlatypusApp:
             
             if filename != "fru.bin":
 <<<<<<< HEAD
+<<<<<<< HEAD
                 self.log_message(f" ERROR: Invalid EEPROM file selected!")
                 self.log_message(f"Selected file: '{filename}'")
                 self.log_message(f"Required file: 'fru.bin'")
@@ -2858,6 +2951,12 @@ class PlatypusApp:
                 self.log_message(f"Required file: 'fru.bin'")
                 self.log_message("⚠️  EEPROM flashing ABORTED for safety!")
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+                self.log_message(f" ERROR: Invalid EEPROM file selected!")
+                self.log_message(f"Selected file: '{filename}'")
+                self.log_message(f"Required file: 'fru.bin'")
+                self.log_message(" EEPROM flashing ABORTED for safety!")
+>>>>>>> 55881ba (Fixed FRU)
                 
                 # Show error dialog to user
                 from tkinter import messagebox
@@ -2942,9 +3041,12 @@ class PlatypusApp:
             if not self.flash_file:
                 self.log_message("Update cancelled: No file selected.")
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
                 self.lock_buttons = False
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+>>>>>>> 55881ba (Fixed FRU)
                 return
 
             # --- DETECTION LOGIC ---
@@ -2968,9 +3070,12 @@ class PlatypusApp:
             if not messagebox.askyesno(f"Confirm {update_type} Update", warning_msg):
                 self.log_message(f"{update_type} update cancelled.")
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
                 self.lock_buttons = False
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+>>>>>>> 55881ba (Fixed FRU)
                 return
             # -----------------------
 
@@ -2992,11 +3097,16 @@ class PlatypusApp:
             self.log_message(f"Error during update: {e}")
         finally:
 <<<<<<< HEAD
+<<<<<<< HEAD
             self.bios_update_running = False
         
 =======
             self.lock_buttons = False
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+            self.bios_update_running = False
+        
+>>>>>>> 55881ba (Fixed FRU)
 
     def reboot_to_bootloader(self):
         """Reboot the OpenBMC to bootloader (U-Boot)"""
@@ -3045,6 +3155,7 @@ class PlatypusApp:
         self.embedded_console.clear()
         self.log_message("Console cleared")
 
+<<<<<<< HEAD
 <<<<<<< HEAD
         
 =======
@@ -3170,6 +3281,8 @@ class PlatypusApp:
                 self.log_message(f"✓ Killed {len(killed_processes)} zombie process(es)")
             else:
                 self.log_message("  No zombie processes found")
+=======
+>>>>>>> 55881ba (Fixed FRU)
         
 <<<<<<< HEAD
         def try_snap_firefox_new_tab(url, user):
@@ -3279,12 +3392,15 @@ class PlatypusApp:
             self.log_message("You can now access the BMC Web UI through your browser.")
             
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
             # Update the Web UI hyperlink
             if hasattr(self, 'update_webui_link'):
                 self.update_webui_link(self.bmc_ip.get())
                 
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+>>>>>>> 55881ba (Fixed FRU)
         except Exception as e:
             self.log_message(f"Error during IP setup: {e}")
         finally:
