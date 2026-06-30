@@ -9,6 +9,8 @@ import threading
 
 from utils import monitor_task, read_serial_data
 from network import stop_server, start_server
+import setproctitle
+setproctitle.setproctitle("platypus")
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -110,6 +112,9 @@ async def flasher(flash_file, my_ip, callback_progress, callback_output, serial_
     port = 80
 
     httpd = start_server(directory, port, callback_output)
+    if not httpd:
+        raise Exception("Local HTTP server failed to start. Aborting U-Boot flash.")
+    
     callback_progress(0.2)
 
     ser = serial.Serial(serial_device, 115200, timeout=1)
@@ -159,6 +164,9 @@ async def flash_eeprom(flash_file, my_ip, callback_progress, callback_output, se
 
     # Start HTTP server
     httpd = start_server(directory, port, callback_output)
+    if not httpd:
+        raise Exception("Local HTTP server failed to start. Aborting EEPROM flash.")
+        
     callback_progress(0.2)
 
     ser = serial.Serial(serial_device, 115200, timeout=1)
@@ -244,8 +252,12 @@ async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, call
     httpd = None
     ser = None  # Initialize serial connection variable
 
+# Around line 186 and 242
     try:
         httpd = start_server(directory, port, callback_output)
+        if not httpd:
+            raise Exception("Local HTTP server failed to start. Check if port 80 is busy. Aborting eMMC flash.")
+            
         callback_progress(0.10)
 
         ser = serial.Serial(serial_device, 115200, timeout=0.1)
@@ -325,6 +337,9 @@ async def flash_emmc2(bmc_ip, directory, my_ip, dd_value, callback_progress, cal
 
     try:
         httpd = start_server(directory, port, callback_output)
+        if not httpd:
+            raise Exception("Local HTTP server failed to start. Check if port 80 is busy. Aborting eMMC flash.")
+            
         callback_progress(0.10)
 
         ser = serial.Serial(serial_device, 115200, timeout=0.1)

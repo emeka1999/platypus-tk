@@ -1165,6 +1165,7 @@ class PlatypusApp:
         # Operation state
         self.lock_buttons = False
         self.operation_running = False
+        self.abort_requested = False
         
         # Flash file
         self.flash_file = None
@@ -1193,6 +1194,7 @@ class PlatypusApp:
             Execute the complete flash all sequence using the provided files.
             This method should be called from the FlashAllWindow.
             """
+            self.abort_requested = False
             self.log_message("=" * 50)
             self.log_message("FLASH ALL SEQUENCE STARTED")
             self.log_message("=" * 50)
@@ -1740,21 +1742,31 @@ class PlatypusApp:
         self.log_box.pack(padx=10, pady=5, fill="x")
 
     def create_progress_section(self):
-        """Create the progress section with the console button restored"""
-        section = ctk.CTkFrame(self.controls_frame)
-        section.pack(fill="x", pady=5)
+            """Create the progress section with the console and stop buttons"""
+            section = ctk.CTkFrame(self.controls_frame)
+            section.pack(fill="x", pady=5)
+            
+            progress_frame = ctk.CTkFrame(section)
+            progress_frame.pack(fill="x", padx=10, pady=5)
+            
+            # Console button
+            ctk.CTkButton(progress_frame, text="Console", command=self.open_minicom_console, height=28).pack(side="left", padx=5)
+            
+            # NEW: Stop Operation Button (Styled Red)
+            self.stop_button = ctk.CTkButton(
+                progress_frame, 
+                text="Stop Operation", 
+                command=self.stop_operation, 
+                height=28,
+                fg_color="#cc0000",      # Red color
+                hover_color="#aa0000"    # Darker red on hover
+            )
+            self.stop_button.pack(side="left", padx=5)
+            
+            self.progress = ctk.CTkProgressBar(progress_frame)
+            self.progress.pack(side="left", expand=True, fill="x", padx=5)
+            self.progress.set(0)
         
-        progress_frame = ctk.CTkFrame(section)
-        progress_frame.pack(fill="x", padx=10, pady=5)
-        
-        # Restore the Console button
-        ctk.CTkButton(progress_frame, text="Console", command=self.open_minicom_console, height=28).pack(side="left", padx=5)
-        
-        self.progress = ctk.CTkProgressBar(progress_frame)
-        self.progress.pack(side="left", expand=True, fill="x", padx=5)
-        self.progress.set(0)
-
-    
 
     def open_multi_unit_flash(self):
         """Open the multi-unit flash window (NanoBMC only)"""
@@ -2178,6 +2190,8 @@ class PlatypusApp:
                 self.log_message(error_msg or f"Missing required fields: {', '.join(missing_fields)}")
                 self.lock_buttons = False
                 return False
+            
+        self.abort_requested = False
         
         # Start thread for operation
         self.lock_buttons = True # Lock buttons here
@@ -2830,7 +2844,39 @@ class PlatypusApp:
             # Save the new configuration
             self.save_config()
             self.log_message(f"🏠 Master home directory updated to: {new_home}")
+
+    def stop_operation(self):
+            """Stops any running operations, cleans up, and restarts the application."""
+            import sys
             
+            self.log_message("\n STOP OPERATION REQUESTED! Cleaning up...")
+            self.abort_requested = True  # Signal any loops to break
+            
+            # 1. Force close serial connections so the port is free for the next instance
+            try:
+                cleanup_all_serial_connections()
+            except Exception:
+                pass
+                
+            # 2. Gracefully stop the HTTP server so port 80 is freed up
+            try:
+                stop_server_dmi(self.log_message)
+            except Exception:
+                pass
+                
+            # 3. Save current configurations before rebooting
+            try:
+                self.save_config()
+            except Exception:
+                pass
+                
+            self.log_message("Restarting application in 2 seconds...")
+            self.root.update()  # Force the UI to update so the user sees the message
+            time.sleep(2)
+            
+            # 4. Restart the app by replacing the current process with a new one
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+                
 
 def main():
     """Main entry point for the application"""

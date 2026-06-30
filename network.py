@@ -1,6 +1,7 @@
 import serial
 import asyncio
-import threading 
+import threading
+import functools
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 import os 
 
@@ -83,12 +84,16 @@ async def set_ip(bmc_ip, callback_progress, callback_output, serial_device):
 
 # Function to start an HTTP server for serving files
 def start_server(directory, port, callback_output):
-    os.chdir(directory)
-    handler = SimpleHTTPRequestHandler
-    httpd = HTTPServer(('0.0.0.0', port), handler)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    callback_output(f"Serving files from {directory} on port {port}")
-    return httpd
+    try:
+        # Use functools to bind the directory without changing the whole OS working directory
+        Handler = functools.partial(SimpleHTTPRequestHandler, directory=directory)
+        httpd = HTTPServer(('0.0.0.0', port), Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        callback_output(f"Serving files from {directory} on port {port}")
+        return httpd
+    except Exception as e:
+        callback_output(f" Server Error: Could not start HTTP server on port {port}: {e}")
+        return None
 
 # Function to stop the HTTP server
 def stop_server(httpd, callback_output):
