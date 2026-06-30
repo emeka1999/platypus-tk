@@ -16,7 +16,6 @@ import os
 import threading
 import glob
 from tkinter import messagebox
-from tkinter import filedialog
 
 try:
     from extra import create_multi_unit_window
@@ -24,7 +23,7 @@ try:
 except ImportError:
     MULTI_UNIT_AVAILABLE = False
     print("Multi-unit functionality not available (extra.py not found)")
-VERSION = "6.1.2"  
+VERSION = "6.1.1"  
 # --- Embedded DMI Scripts ---
 
 # FRU_flash_v2.sh content
@@ -262,7 +261,7 @@ fi
 
 echo_BMC "Done, checksums were validated successfully."
 """
-stop_event = threading.Event()
+
 # --- Global HTTP Server Variable ---
 http_server = None
 server_lock = threading.Lock()
@@ -503,163 +502,191 @@ async def transfer_and_run_script(
 
 class FileSelectionHelper:
     """Helper class to standardize and simplify file/directory selection dialogs"""
-
-    @staticmethod
-    def get_real_home():
-        """Gets the actual user's home directory, even if running under sudo"""
-        import pwd
-        import os
-        
-        # Try to get the real user if the app was launched via sudo
-        sudo_user = os.environ.get('SUDO_USER')
-        if sudo_user:
-            try:
-                return pwd.getpwnam(sudo_user).pw_dir
-            except KeyError:
-                pass
-        
-        # Standard home expansion
-        home = os.path.expanduser("~")
-        
-        # If it resolved to root, try to guess the real user directory in /home
-        if home == "/root" or not os.path.isdir(home):
-            try:
-                users = [d for d in os.listdir("/home") if os.path.isdir(os.path.join("/home", d))]
-                if len(users) == 1:  # If there's only one user on the machine, it's a safe bet
-                    return os.path.join("/home", users[0])
-            except Exception:
-                pass
-            return "/home"
-            
-        return home
-
-    @staticmethod
-    def _default_dir(last_dir):
-        """Return last_dir if valid, otherwise default to the real user's home"""
-        # Ensure we don't accidentally default to the root directory
-        if last_dir and os.path.isdir(last_dir) and last_dir != "/root":
-            return last_dir
-        return FileSelectionHelper.get_real_home()
-
+    
     @staticmethod
     def select_file(parent, title, last_dir, file_filter=None):
-        """File selection using tkinter dialog"""
-        filetypes = []
-        if file_filter:
-            if '|' in file_filter:
-                label = file_filter.split('|')[0].strip()
-                pattern = file_filter.split('|')[1].strip()
-                filetypes = [(label, pattern), ("All files", "*.*")]
-            else:
-                filetypes = [("Files", file_filter), ("All files", "*.*")]
-        else:
-            filetypes = [("All files", "*.*")]
-
-        parent.update_idletasks()
-        parent.lift()
-
-        file_path = filedialog.askopenfilename(
-            parent=parent,
-            title=title,
-            initialdir=FileSelectionHelper._default_dir(last_dir),
-            filetypes=filetypes
-        )
-        return file_path or ""
-
+        """Generic file selection with fallbacks for platform compatibility"""
+        file_path = ""
+        
+        # Try zenity first with proper file filter formatting
+        try:
+            filter_params = []
+            if file_filter:
+                # Convert our filter format to zenity format
+                # Example: "Binary files (*.bin) | *.bin" -> "*.bin"
+                if '|' in file_filter:
+                    zenity_filter = file_filter.split('|')[-1].strip()
+                else:
+                    zenity_filter = file_filter
+                filter_params = ['--file-filter', zenity_filter]
+                
+            result = subprocess.run(
+                ['zenity', '--file-selection', f'--filename={last_dir}/', 
+                 f'--title={title}'] + filter_params,
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                file_path = result.stdout.strip()
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # Try kdialog next with proper filter formatting
+            try:
+                if file_filter:
+                    # Convert our filter to kdialog format
+                    if '|' in file_filter:
+                        # Extract the pattern part after |
+                        pattern = file_filter.split('|')[-1].strip()
+                        # KDialog expects format like "*.bin *.tar.gz"
+                        kdialog_filter = pattern
+                    else:
+                        kdialog_filter = file_filter
+                else:
+                    kdialog_filter = '*'
+                    
+                result = subprocess.run(
+                    ['kdialog', '--getopenfilename', last_dir, kdialog_filter],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    file_path = result.stdout.strip()
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # Fall back to a simple CustomTkinter dialog
+                file_path = FileSelectionHelper._show_entry_dialog(
+                    parent, title, last_dir, f"Enter the full path to {title.lower()}:", file_filter
+                )
+                
+        return file_path
+        
     @staticmethod
     def select_directory(parent, title, last_dir):
-        """Directory selection using tkinter dialog"""
-        parent.update_idletasks()
-        parent.lift()
-
-        directory = filedialog.askdirectory(
-            parent=parent,
-            title=title,
-            initialdir=FileSelectionHelper._default_dir(last_dir),
-        )
-        return directory or ""
-
+        """Generic directory selection with fallbacks for platform compatibility"""
+        directory = ""
+        
+        # Try zenity first (removed timeout)
+        try:
+            result = subprocess.run(
+                ['zenity', '--file-selection', '--directory', 
+                 f'--filename={last_dir}/', f'--title={title}'],
+                capture_output=True, text=True
+                # Removed timeout=10 to allow unlimited time for selection
+            )
+            if result.returncode == 0:
+                directory = result.stdout.strip()
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # Try kdialog next (removed timeout)
+            try:
+                result = subprocess.run(
+                    ['kdialog', '--getexistingdirectory', last_dir, title],
+                    capture_output=True, text=True
+                    # Removed timeout=10 to allow unlimited time for selection
+                )
+                if result.returncode == 0:
+                    directory = result.stdout.strip()
+            except (subprocess.SubprocessError, FileNotFoundError):
+                # Fall back to a simple CustomTkinter dialog
+                directory = FileSelectionHelper._show_entry_dialog(
+                    parent, title, last_dir, "Enter the full path to directory:"
+                )
+                
+        return directory
+        
     @staticmethod
     def _show_entry_dialog(parent, title, default_value, message, file_filter=None):
-        """Fallback manual path entry dialog"""
+        """Helper method to show a simple input dialog with better UX"""
         dialog = ctk.CTkToplevel(parent)
         dialog.title(title)
-        dialog.geometry("600x200")
+        dialog.geometry("600x200")  # Made slightly larger
         dialog.attributes('-topmost', True)
+        
+        # Make dialog resizable
         dialog.resizable(True, True)
-
-        # Initialize to the real home if the default is empty or root
-        if not default_value or default_value == "/root":
-            default_value = FileSelectionHelper.get_real_home()
-
+        
         path_var = ctk.StringVar(value=default_value)
-
+        
+        # Add some padding and better layout
         main_frame = ctk.CTkFrame(dialog)
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
-
-        filter_info = f"{message}\n\nExpected file type: {file_filter}" if file_filter else message
+        
+        # Show file filter info if provided
+        if file_filter:
+            filter_info = f"{message}\n\nExpected file type: {file_filter}"
+        else:
+            filter_info = message
+            
         ctk.CTkLabel(main_frame, text=filter_info, wraplength=500).pack(pady=10)
-
+        
+        # Entry with better visibility
         entry = ctk.CTkEntry(main_frame, textvariable=path_var, width=500, height=32)
         entry.pack(pady=10, fill="x")
-        entry.focus_set()
-
+        entry.focus_set()  # Focus on the entry field
+        
+        # Add browse button for convenience
         browse_frame = ctk.CTkFrame(main_frame)
         browse_frame.pack(fill="x", pady=5)
-
+        
         def browse_for_path():
-            parent.update_idletasks()
-            parent.lift()
-            initial = FileSelectionHelper._default_dir(path_var.get())
-            if "directory" in message.lower():
-                result = filedialog.askdirectory(title=f"Browse for {title}", initialdir=initial)
-                if result:
-                    path_var.set(result)
-            else:
-                result = filedialog.askopenfilename(title=f"Browse for {title}", initialdir=initial)
-                if result:
-                    path_var.set(result)
-
-        def set_to_home():
-            """Quick action to set the path to the real home directory"""
-            path_var.set(FileSelectionHelper.get_real_home())
-
-        ctk.CTkButton(browse_frame, text="Browse...", command=browse_for_path, width=100).pack(side="right", padx=(5, 0))
-        # New quick-action Home button
-        ctk.CTkButton(browse_frame, text="🏠 Home", command=set_to_home, width=100, fg_color="#444444", hover_color="#666666").pack(side="right")
-
-        result_path = []
-
+            """Allow user to browse instead of typing path"""
+            try:
+                if "directory" in message.lower():
+                    # Use a simple directory browser
+                    result = subprocess.run(
+                        ['zenity', '--file-selection', '--directory', f'--title=Browse for {title}'],
+                        capture_output=True, text=True
+                    )
+                    if result.returncode == 0:
+                        path_var.set(result.stdout.strip())
+                else:
+                    # Use a simple file browser with filter if available
+                    cmd = ['zenity', '--file-selection', f'--title=Browse for {title}']
+                    if file_filter and '|' in file_filter:
+                        pattern = file_filter.split('|')[-1].strip()
+                        cmd.extend(['--file-filter', pattern])
+                    
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    if result.returncode == 0:
+                        path_var.set(result.stdout.strip())
+            except:
+                pass  # Ignore if zenity not available
+        
+        ctk.CTkButton(browse_frame, text="Browse...", command=browse_for_path, width=100).pack(side="right")
+        
+        result_path = []  # Use a list to store the result
+        
         def on_ok():
             path = path_var.get().strip()
             if path and (os.path.exists(path) or "Enter the full path" in message):
                 result_path.append(path)
                 dialog.destroy()
             else:
+                # Show error message
                 error_label = ctk.CTkLabel(main_frame, text="⚠️ Path does not exist!", text_color="red")
                 error_label.pack(pady=5)
-                dialog.after(3000, error_label.destroy)
-
+                dialog.after(3000, error_label.destroy)  # Remove error after 3 seconds
+        
         def on_cancel():
             dialog.destroy()
-
-        entry.bind('<Return>', lambda e: on_ok())
-
+        
+        # Handle Enter key
+        def on_enter(event):
+            on_ok()
+        
+        entry.bind('<Return>', on_enter)
+        
         button_frame = ctk.CTkFrame(main_frame)
         button_frame.pack(fill="x", pady=10)
         ctk.CTkButton(button_frame, text="OK", command=on_ok, width=100).pack(side="left", padx=20)
         ctk.CTkButton(button_frame, text="Cancel", command=on_cancel, width=100).pack(side="right", padx=20)
-
+        
+        # Center the dialog
         dialog.update_idletasks()
         width = dialog.winfo_width()
         height = dialog.winfo_height()
         x = (dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (dialog.winfo_screenheight() // 2) - (height // 2)
         dialog.geometry(f'{width}x{height}+{x}+{y}')
-
-        dialog.grab_set()
-        dialog.wait_window()
-
+        
+        dialog.grab_set()  # Make dialog modal
+        dialog.wait_window()  # Wait for dialog to close
+        
         return result_path[0] if result_path else ""
 
 class FlashAllWindow(ctk.CTkToplevel):
@@ -820,7 +847,7 @@ class FlashAllWindow(ctk.CTkToplevel):
             allowed_fip_files = {"fip-snuc-nanobmc.bin", "fip-snuc-mos-bmc.bin"}
             
             if filename not in allowed_fip_files:
-                self.log_message(f" Invalid FIP file: '{filename}'")
+                self.log_message(f"❌ Invalid FIP file: '{filename}'")
                 self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
                 
                 from tkinter import messagebox
@@ -863,7 +890,7 @@ class FlashAllWindow(ctk.CTkToplevel):
             filename = os.path.basename(file_path)
             
             if filename != "fru.bin":
-                self.log_message(f" Invalid EEPROM file: '{filename}'")
+                self.log_message(f"❌ Invalid EEPROM file: '{filename}'")
                 self.log_message(f"Required file: 'fru.bin'")
                 
                 from tkinter import messagebox
@@ -958,7 +985,7 @@ class PlatypusApp:
 
         # Create main window with specific class name
         self.root = ctk.CTk(className="PlatypusApp")  # Set class name during creation
-        self.root.title("Platypus BMC Management - 6.1.2")
+        self.root.title("Platypus BMC Management - 6.1.1")
         self.root.geometry("800x850")  # Adjusted to fit 1080p
         
         # Initialize variables
@@ -1165,7 +1192,6 @@ class PlatypusApp:
         # Operation state
         self.lock_buttons = False
         self.operation_running = False
-        self.abort_requested = False
         
         # Flash file
         self.flash_file = None
@@ -1186,178 +1212,134 @@ class PlatypusApp:
         self.fru_asmid = ctk.StringVar()
         self.fru_mfg = ctk.StringVar(value="Simply NUC")
         self.sku_list = [] # Will be populated by load_or_create_skus
-        # Master Home Directory
-        self.user_home_dir = ""
 
     def execute_flash_all(self, firmware_folder, fip_file, eeprom_file=None, bmc_type=2, do_flash_fru=True):
-            """
-            Execute the complete flash all sequence using the provided files.
-            This method should be called from the FlashAllWindow.
-            """
-            self.abort_requested = False
-            self.log_message("=" * 50)
-            self.log_message("FLASH ALL SEQUENCE STARTED")
-            self.log_message("=" * 50)
-            self.lock_buttons = True
+        """
+        Execute the complete flash all sequence using the provided files.
+        This method should be called from the FlashAllWindow.
+        """
+        self.log_message("=" * 50)
+        self.log_message("FLASH ALL SEQUENCE STARTED")
+        self.log_message("=" * 50)
+        self.lock_buttons = True
+        
+        # Determine total steps based on BMC type and if FRU flash is requested
+        total_steps = 5 if (bmc_type != 1 and eeprom_file and do_flash_fru) else 4
+        current_step = 0
+        
+        # Step names for better logging
+        step_names = {
+            1: "Flash eMMC",
+            2: "Login to BMC", 
+            3: "Set BMC IP",
+            4: "Flash U-Boot",
+            5: "Flash EEPROM"
+        }
+        
+        def update_overall_progress(step_progress, step_number, step_name):
+            """Update overall progress based on current step and its progress"""
+            # Each step gets equal weight in the overall progress
+            step_weight = 1.0 / total_steps
+            overall_progress = ((step_number - 1) * step_weight) + (step_progress * step_weight)
+            self.update_progress(overall_progress)
             
-            # Determine total steps based on BMC type and if FRU flash is requested
-            total_steps = 5 if (bmc_type != 1 and eeprom_file and do_flash_fru) else 4
-            current_step = 0
+            # Log detailed progress updates
+            if step_progress == 0.0:
+                self.log_message(f"→ Starting Step {step_number}/{total_steps}: {step_name}")
+            elif step_progress == 1.0:
+                overall_percent = int(overall_progress * 100)
+                self.log_message(f"✓ Completed Step {step_number}/{total_steps}: {step_name} (Overall: {overall_percent}%)")
+            elif step_progress > 0:
+                step_percent = int(step_progress * 100)
+                overall_percent = int(overall_progress * 100)
+                if step_percent % 25 == 0 or step_percent in [10, 30, 50, 70, 90]:  # Log at key intervals
+                    self.log_message(f"  Step {step_number}: {step_percent}% | Overall: {overall_percent}%")
+        
+        try:
+            # Step 1: Flash eMMC 
+            current_step = 1
+            step_name = step_names[current_step]
+            self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
+            self.log_message("-" * 30)
             
-            # Step names for better logging
-            step_names = {
-                1: "Flash eMMC",
-                2: "Login to BMC", 
-                3: "Set BMC IP",
-                4: "Flash U-Boot",
-                5: "Flash EEPROM"
-            }
-            
-            def update_overall_progress(step_progress, step_number, step_name):
-                """Update overall progress based on current step and its progress"""
-                # Each step gets equal weight in the overall progress
-                step_weight = 1.0 / total_steps
-                overall_progress = ((step_number - 1) * step_weight) + (step_progress * step_weight)
-                self.update_progress(overall_progress)
+            def emmc_progress_callback(progress):
+                update_overall_progress(progress, current_step, step_name)
                 
-                # Log detailed progress updates
-                if step_progress == 0.0:
-                    self.log_message(f"→ Starting Step {step_number}/{total_steps}: {step_name}")
-                elif step_progress == 1.0:
-                    overall_percent = int(overall_progress * 100)
-                    self.log_message(f"✓ Completed Step {step_number}/{total_steps}: {step_name} (Overall: {overall_percent}%)")
-                elif step_progress > 0:
-                    step_percent = int(step_progress * 100)
-                    overall_percent = int(overall_progress * 100)
-                    if step_percent % 25 == 0 or step_percent in [10, 30, 50, 70, 90]:  # Log at key intervals
-                        self.log_message(f"  Step {step_number}: {step_percent}% | Overall: {overall_percent}%")
+            asyncio.run(bmc.flash_emmc2(
+                self.bmc_ip.get(), 
+                firmware_folder, 
+                self.your_ip.get(), 
+                self.bmc_type.get(), 
+                emmc_progress_callback,
+                self.log_message,
+                self.serial_device.get()
+            ))
+            self.log_message("Running FRU Flash")
             
-            try:
-                # Step 1: Flash eMMC 
-                current_step = 1
-                step_name = step_names[current_step]
-                self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
-                self.log_message("-" * 30)
-                
-                def emmc_progress_callback(progress):
-                    update_overall_progress(progress, current_step, step_name)
-                    
-                asyncio.run(bmc.flash_emmc2(
-                    self.bmc_ip.get(), 
-                    firmware_folder, 
-                    self.your_ip.get(), 
-                    self.bmc_type.get(), 
-                    emmc_progress_callback,
-                    self.log_message,
-                    self.serial_device.get()
-                ))
-                self.log_message("Running FRU Flash")
-                
-                time.sleep(35)
 
-                # Step 2: Flash U-Boot (FIP)
-                current_step = 2
+            time.sleep(25)
+
+            # Step 2: Flash U-Boot (FIP)
+            current_step = 2
+            step_name = step_names[current_step]
+            self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
+            self.log_message("-" * 30)
+            
+            def fip_progress_callback(progress):
+                update_overall_progress(progress, current_step, step_name)
+                
+            asyncio.run(bmc.flasher(
+                fip_file, 
+                self.your_ip.get(), 
+                fip_progress_callback,
+                self.log_message, 
+                self.serial_device.get()
+            ))
+            
+            # Step 3: Flash EEPROM (if needed and requested)
+            if bmc_type != 1 and eeprom_file and do_flash_fru:
+                current_step = 5
                 step_name = step_names[current_step]
                 self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
                 self.log_message("-" * 30)
                 
-                def fip_progress_callback(progress):
+                def eeprom_progress_callback(progress):
                     update_overall_progress(progress, current_step, step_name)
                     
-                asyncio.run(bmc.flasher(
-                    fip_file, 
+                asyncio.run(bmc.flash_eeprom(
+                    eeprom_file, 
                     self.your_ip.get(), 
-                    fip_progress_callback,
+                    eeprom_progress_callback,
                     self.log_message, 
                     self.serial_device.get()
                 ))
-                
-                # Step 3: Flash EEPROM (if needed and requested)
-                if bmc_type != 1 and eeprom_file and do_flash_fru:
-                    
-                    # --- NEW REBOOT, LOGIN, & IP LOGIC ---
-                    self.log_message("Rebooting system before flashing EEPROM...")
-                    try:
-                        asyncio.run(bmc.reboot_bmc(
-                            self.log_message,
-                            self.serial_device.get()
-                        ))
-                    except Exception as reboot_err:
-                        self.log_message(f"Warning: Reboot command failed: {reboot_err}")
-                    
-                    self.log_message("Waiting 40 seconds for system to boot...")
-                    time.sleep(60)
+            elif bmc_type != 1:
+                self.log_message(f"\n[STEP 5/{total_steps}] Skipping EEPROM Flash (as requested).") 
 
-                    self.log_message("Logging in to prepare for EEPROM flash...")
-                    asyncio.run(login(
-                        self.username.get(), 
-                        self.password.get(), 
-                        self.serial_device.get(), 
-                        self.log_message
-                    ))
-
-                    self.log_message("Waiting 5 seconds before setting IP...")
-                    time.sleep(5)
-                    
-                    self.log_message("Setting BMC IP...")
-                    asyncio.run(set_ip(
-                        self.bmc_ip.get(), 
-                        lambda p: None, # Dummy callback to prevent progress bar jumping
-                        self.log_message, 
-                        self.serial_device.get()
-                    ))
-
-                    self.log_message("Waiting 2 seconds before initiating EEPROM flash...")
-                    time.sleep(2)
-                    # --------------------------------
-
-                    current_step = 5
-                    step_name = step_names[current_step]
-                    self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
-                    self.log_message("-" * 30)
-                    
-                    def eeprom_progress_callback(progress):
-                        update_overall_progress(progress, current_step, step_name)
-                        
-                    asyncio.run(bmc.flash_eeprom(
-                        eeprom_file, 
-                        self.your_ip.get(), 
-                        eeprom_progress_callback,
-                        self.log_message, 
-                        self.serial_device.get()
-                    ))
-                elif bmc_type != 1:
-                    self.log_message(f"\n[STEP 5/{total_steps}] Skipping EEPROM Flash (as requested).") 
-                    try:
-                        asyncio.run(bmc.reboot_bmc(
-                            self.log_message,
-                            self.serial_device.get()
-                        ))
-                    except Exception as reboot_err:
-                        self.log_message(f"Warning: Reboot command failed: {reboot_err}")
-                
-                # Complete - set progress to 100%
-                self.update_progress(1.0)
-                self.log_message("\n" + "=" * 50)
-                self.log_message(" FLASH ALL SEQUENCE COMPLETED SUCCESSFULLY!") 
-                self.log_message("=" * 50)
-                
-                # Reset progress after a brief delay
-                def reset_progress():
-                    import time
-                    time.sleep(3)
-                    self.update_progress(0)
-                
-                import threading
-                threading.Thread(target=reset_progress, daemon=True).start()
-                
-            except Exception as e:
-                self.log_message(f"\n ERROR during Flash All sequence at Step {current_step}: {str(e)}")
-                self.log_message("=" * 50)
-                # Reset progress on error
+            self.reboot_bmc
+            
+            # Complete - set progress to 100%
+            self.update_progress(1.0)
+            self.log_message("\n" + "=" * 50)
+            self.log_message("🎉 FLASH ALL SEQUENCE COMPLETED SUCCESSFULLY!") 
+            self.log_message("=" * 50)
+            
+            # Reset progress after a brief delay
+            def reset_progress():
+                import time
+                time.sleep(3)
                 self.update_progress(0)
-            finally:
-                self.lock_buttons = False
+            
+            import threading
+            threading.Thread(target=reset_progress, daemon=True).start()
+            
+        except Exception as e:
+            self.log_message(f"\n❌ ERROR during Flash All sequence at Step {current_step}: {str(e)}")
+            self.log_message("=" * 50)
+            # Reset progress on error
+            self.update_progress(0)
+        finally:
+            self.lock_buttons = False
         
     def _create_ui(self):
         """Create all UI sections with reduced vertical spacing"""
@@ -1420,7 +1402,6 @@ class PlatypusApp:
                         self.last_firmware_dir = config.get("last_firmware_dir", os.path.expanduser("~"))
                         self.last_fip_dir = config.get("last_fip_dir", os.path.expanduser("~"))
                         self.last_eeprom_dir = config.get("last_eeprom_dir", os.path.expanduser("~"))
-                        self.user_home_dir = config.get("user_home_dir", "")
                         
                         # Load Flash All specific paths
                         self.last_flash_all_folder = config.get("last_flash_all_folder", "")
@@ -1528,9 +1509,6 @@ class PlatypusApp:
             "last_sku": self.fru_sku.get(),
             "last_asmid": self.fru_asmid.get(),
             "last_mfg": self.fru_mfg.get(),
-
-            # Save Master home
-            "user_home_dir": getattr(self, 'user_home_dir', ""),
         }
         try:
             with open(self.CONFIG_FILE, 'w') as config_file:
@@ -1693,8 +1671,7 @@ class PlatypusApp:
             ("Flash FRU (EEPROM)", self.flash_eeprom),
             ("Flash All", self.on_flash_all),
             ("Multi-Unit Flash", self.open_multi_unit_flash),  # NEW BUTTON
-            ("Reboot to Bootloader", self.reboot_to_bootloader),
-            ("Set Home Directory", self.set_home_directory)
+            ("Reboot to Bootloader", self.reboot_to_bootloader)
         ]
         
         for i, (text, command) in enumerate(ops):
@@ -1742,31 +1719,21 @@ class PlatypusApp:
         self.log_box.pack(padx=10, pady=5, fill="x")
 
     def create_progress_section(self):
-            """Create the progress section with the console and stop buttons"""
-            section = ctk.CTkFrame(self.controls_frame)
-            section.pack(fill="x", pady=5)
-            
-            progress_frame = ctk.CTkFrame(section)
-            progress_frame.pack(fill="x", padx=10, pady=5)
-            
-            # Console button
-            ctk.CTkButton(progress_frame, text="Console", command=self.open_minicom_console, height=28).pack(side="left", padx=5)
-            
-            # NEW: Stop Operation Button (Styled Red)
-            self.stop_button = ctk.CTkButton(
-                progress_frame, 
-                text="Stop Operation", 
-                command=self.stop_operation, 
-                height=28,
-                fg_color="#cc0000",      # Red color
-                hover_color="#aa0000"    # Darker red on hover
-            )
-            self.stop_button.pack(side="left", padx=5)
-            
-            self.progress = ctk.CTkProgressBar(progress_frame)
-            self.progress.pack(side="left", expand=True, fill="x", padx=5)
-            self.progress.set(0)
+        """Create the progress section with the console button restored"""
+        section = ctk.CTkFrame(self.controls_frame)
+        section.pack(fill="x", pady=5)
         
+        progress_frame = ctk.CTkFrame(section)
+        progress_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Restore the Console button
+        ctk.CTkButton(progress_frame, text="Console", command=self.open_minicom_console, height=28).pack(side="left", padx=5)
+        
+        self.progress = ctk.CTkProgressBar(progress_frame)
+        self.progress.pack(side="left", expand=True, fill="x", padx=5)
+        self.progress.set(0)
+
+    
 
     def open_multi_unit_flash(self):
         """Open the multi-unit flash window (NanoBMC only)"""
@@ -2039,7 +2006,7 @@ class PlatypusApp:
             
             # If no interfaces found, show error and keep current
             if not ips:
-                self.log_message(" No network interfaces found")
+                self.log_message("❌ No network interfaces found")
                 return
                 
             # Update the dropdown values with all detected IPs
@@ -2065,7 +2032,7 @@ class PlatypusApp:
             self.log_message(f"Host IP dropdown updated with {len(ips)} interface(s)")
                     
         except Exception as e:
-            self.log_message(f" Error updating network interfaces: {e}")
+            self.log_message(f"❌ Error updating network interfaces: {e}")
             # Don't crash - just keep whatever was there before
 
     def log_message(self, message):
@@ -2085,10 +2052,6 @@ class PlatypusApp:
 
     def validate_button_click(self):
         """Check if buttons should be locked (operation in progress)"""
-        # Exception: allow clicks while BIOS/BMC update is running
-        if getattr(self, 'bios_update_running', False):
-            return True
-
         if self.lock_buttons:
             self.log_message("Another operation is in progress. Please wait...")
             return False
@@ -2140,6 +2103,7 @@ class PlatypusApp:
                         pass
         except Exception as e:
             self.log_message(f"Error cleaning minicom processes: {e}")
+    
 
     def cleanup_server_processes(self):
         """Clean up any running server processes (TFTP, HTTP, etc.)"""
@@ -2190,8 +2154,6 @@ class PlatypusApp:
                 self.log_message(error_msg or f"Missing required fields: {', '.join(missing_fields)}")
                 self.lock_buttons = False
                 return False
-            
-        self.abort_requested = False
         
         # Start thread for operation
         self.lock_buttons = True # Lock buttons here
@@ -2468,10 +2430,10 @@ class PlatypusApp:
                 allowed_fip_files = {"fip-snuc-nanobmc.bin", "fip-snuc-mos-bmc.bin"}
                 
                 if filename not in allowed_fip_files:
-                    self.log_message(f" ERROR: Invalid FIP file selected!")
+                    self.log_message(f"❌ ERROR: Invalid FIP file selected!")
                     self.log_message(f"Selected file: '{filename}'")
                     self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
-                    self.log_message(" FIP flashing ABORTED for safety!")
+                    self.log_message("⚠️  FIP flashing ABORTED for safety!")
                     
                     # Show error dialog to user
                     from tkinter import messagebox
@@ -2608,7 +2570,6 @@ class PlatypusApp:
             error_msg="Please enter Host IP and select a serial device"
         ):
             self.log_message("Starting EEPROM flashing operation...")
-    
 
     async def run_flash_eeprom(self):
         """Run flash EEPROM operation with strict filename validation"""
@@ -2630,10 +2591,10 @@ class PlatypusApp:
             filename = os.path.basename(file_path)
             
             if filename != "fru.bin":
-                self.log_message(f" ERROR: Invalid EEPROM file selected!")
+                self.log_message(f"❌ ERROR: Invalid EEPROM file selected!")
                 self.log_message(f"Selected file: '{filename}'")
                 self.log_message(f"Required file: 'fru.bin'")
-                self.log_message(" EEPROM flashing ABORTED for safety!")
+                self.log_message("⚠️  EEPROM flashing ABORTED for safety!")
                 
                 # Show error dialog to user
                 from tkinter import messagebox
@@ -2704,11 +2665,12 @@ class PlatypusApp:
                 self.root, 
                 "Select Firmware File",
                 self.last_firmware_dir,
-                "Firmware Files (*.tar.gz) | *.tar.gz"
+                "Firmware Files (*.tar.gz *.bin *.img) | *.tar.gz;*.bin;*.img"
             )
             
             if not self.flash_file:
                 self.log_message("Update cancelled: No file selected.")
+                self.lock_buttons = False
                 return
 
             # --- DETECTION LOGIC ---
@@ -2731,13 +2693,13 @@ class PlatypusApp:
             # Show the specific popup
             if not messagebox.askyesno(f"Confirm {update_type} Update", warning_msg):
                 self.log_message(f"{update_type} update cancelled.")
+                self.lock_buttons = False
                 return
             # -----------------------
 
             with open(self.flash_file, 'rb') as fw_file:
                 fw_content = fw_file.read()
                 self.log_message(f"Starting {update_type} update process...")
-                is_bmc_file = "bmc" in self.flash_file.lower()
 
                 await bmc.bios_update(
                     self.username.get(),
@@ -2746,13 +2708,11 @@ class PlatypusApp:
                     fw_content,
                     self.update_progress,
                     self.log_message,
-                    is_bmc=is_bmc_file
                 )
         except Exception as e:
             self.log_message(f"Error during update: {e}")
         finally:
-            self.bios_update_running = False
-        
+            self.lock_buttons = False
 
     def reboot_to_bootloader(self):
         """Reboot the OpenBMC to bootloader (U-Boot)"""
@@ -2801,7 +2761,218 @@ class PlatypusApp:
         self.embedded_console.clear()
         self.log_message("Console cleared")
 
+
         
+
+        
+        def get_real_user():
+            """Get the real user who launched the app (when running as root)"""
+            real_user = None
+            
+            # Try multiple methods to get real user
+            real_user = os.environ.get('SUDO_USER') or os.environ.get('PKEXEC_UID')
+            
+            # If PKEXEC_UID is a UID, convert to username
+            if real_user and real_user.isdigit():
+                import pwd
+                try:
+                    real_user = pwd.getpwuid(int(real_user)).pw_name
+                except:
+                    real_user = None
+            
+            # If still no user, try to detect from who command
+            if not real_user:
+                try:
+                    who_output = subprocess.check_output(['who'], universal_newlines=True).strip()
+                    for line in who_output.split('\n'):
+                        if line and not line.startswith('root '):
+                            real_user = line.split()[0]
+                            break
+                except:
+                    pass
+            
+            return real_user
+        
+        def cleanup_firefox_locks(user):
+            """Clean up Firefox lock files that prevent new instances"""
+            self.log_message("Cleaning up Firefox lock files...")
+            
+            # Common Firefox profile locations for snap
+            profile_paths = [
+                f"/home/{user}/snap/firefox/common/.mozilla/firefox/",
+                f"/home/{user}/.mozilla/firefox/",
+                f"/home/{user}/snap/firefox/current/.mozilla/firefox/"
+            ]
+            
+            cleaned_files = []
+            
+            for profile_base in profile_paths:
+                try:
+                    if os.path.exists(profile_base):
+                        # Find all profile directories
+                        profile_dirs = glob.glob(os.path.join(profile_base, "*.default*"))
+                        
+                        for profile_dir in profile_dirs:
+                            # Lock files to remove
+                            lock_files = [
+                                os.path.join(profile_dir, "lock"),
+                                os.path.join(profile_dir, ".parentlock"),
+                                os.path.join(profile_dir, "parent.lock")
+                            ]
+                            
+                            for lock_file in lock_files:
+                                if os.path.exists(lock_file):
+                                    try:
+                                        # Use sudo to remove as the user
+                                        subprocess.run(
+                                            f"sudo -u {user} rm -f '{lock_file}'",
+                                            shell=True,
+                                            stdout=subprocess.DEVNULL,
+                                            stderr=subprocess.DEVNULL,
+                                            timeout=3
+                                        )
+                                        cleaned_files.append(lock_file)
+                                    except:
+                                        # Try direct removal if sudo fails
+                                        try:
+                                            os.remove(lock_file)
+                                            cleaned_files.append(lock_file)
+                                        except:
+                                            pass
+                except Exception as e:
+                    self.log_message(f"  Error cleaning {profile_base}: {e}")
+            
+            if cleaned_files:
+                self.log_message(f"✓ Removed {len(cleaned_files)} lock file(s)")
+                for file in cleaned_files:
+                    self.log_message(f"  - {file}")
+            else:
+                self.log_message("  No lock files found to clean")
+        
+        def kill_zombie_firefox_processes(user):
+            """Kill any zombie Firefox processes"""
+            self.log_message("Checking for zombie Firefox processes...")
+            
+            killed_processes = []
+            
+            try:
+                for proc in psutil.process_iter(['pid', 'name', 'username', 'status']):
+                    if (proc.info['username'] == user and 
+                        proc.info['name'] and 
+                        'firefox' in proc.info['name'].lower()):
+                        
+                        try:
+                            # Check if process is actually responsive
+                            if proc.info['status'] == psutil.STATUS_ZOMBIE:
+                                self.log_message(f"  Found zombie Firefox process: PID {proc.info['pid']}")
+                                subprocess.run(f"sudo kill -9 {proc.info['pid']}", shell=True, timeout=2)
+                                killed_processes.append(proc.info['pid'])
+                            else:
+                                # Try to send a test signal to see if it's responsive
+                                try:
+                                    os.kill(proc.info['pid'], 0)  # Test signal
+                                except ProcessLookupError:
+                                    # Process is dead but still listed
+                                    killed_processes.append(proc.info['pid'])
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+            except Exception as e:
+                self.log_message(f"  Error checking processes: {e}")
+            
+            if killed_processes:
+                self.log_message(f"✓ Killed {len(killed_processes)} zombie process(es)")
+            else:
+                self.log_message("  No zombie processes found")
+        
+        def try_snap_firefox_new_tab(url, user):
+            """Try to open new tab in existing Snap Firefox"""
+            
+            # Snap Firefox commands with new-window fallback
+            snap_commands = [
+                # Method 1: Try new-tab first
+                f"sudo -u {user} snap run firefox --new-tab --url '{url}'",
+                
+            ]
+            
+            for i, cmd in enumerate(snap_commands, 1):
+                try:
+                    method_name = (
+                        "new-tab" if "--new-tab" in cmd else
+                        "new-window" if "--new-window" in cmd else
+                        "new-instance" if "--new-instance" in cmd else
+                        "no-remote" if "--no-remote" in cmd else
+                        "direct"
+                    )
+                    
+                    self.log_message(f"Firefox method {i} ({method_name}): Trying...")
+                    
+                    result = subprocess.run(
+                        cmd,
+                        shell=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=10
+                    )
+                    
+                    if result.returncode == 0:
+                        self.log_message(f"✓ Firefox launched successfully with {method_name}")
+                        return True
+                    else:
+                        self.log_message(f"  Method {i} failed (code: {result.returncode})")
+                        
+                except subprocess.TimeoutExpired:
+                    self.log_message(f"  Method {i} timed out")
+                except Exception as e:
+                    self.log_message(f"  Method {i} error: {e}")
+                    
+            return False
+        
+        def launch_snap_firefox():
+            try:
+                # Get real user
+                real_user = get_real_user()
+                
+                if not real_user:
+                    self.log_message("❌ Could not determine real user")
+
+                    return False
+                
+                self.log_message(f"Real user: {real_user}")
+                self.log_message("Preparing Firefox launch...")
+                
+                # Step 1: Clean up lock files
+                cleanup_firefox_locks(real_user)
+                
+                # Step 2: Kill any zombie processes
+                kill_zombie_firefox_processes(real_user)
+                
+                # Step 3: Wait a moment for cleanup to complete
+                import time
+                time.sleep(1)
+                
+                # Step 4: Try to launch Firefox
+                self.log_message("Attempting to launch Firefox...")
+                
+                if try_snap_firefox_new_tab(bmc_url, real_user):
+                    self.log_message("🎉 Firefox opened successfully!")
+                    return True
+                
+                # All methods failed
+                self.log_message("❌ All Firefox launch methods failed")
+                
+                # Show helpful instructions
+
+                return False
+                    
+            except Exception as e:
+                self.log_message(f"❌ Error during Firefox launch: {e}")
+                
+
+                return False
+        
+        # Launch Firefox in background thread
+        threading.Thread(target=launch_snap_firefox, daemon=True).start()
+
     async def run_set_bmc_ip(self):
         """Run set BMC IP operation with Web UI hyperlink update"""
         try:
@@ -2816,67 +2987,15 @@ class PlatypusApp:
             self.log_message(f"IP set successfully to {self.bmc_ip.get()}")
             self.log_message("You can now access the BMC Web UI through your browser.")
             
+            # Update the Web UI hyperlink
+            if hasattr(self, 'update_webui_link'):
+                self.update_webui_link(self.bmc_ip.get())
+                
         except Exception as e:
             self.log_message(f"Error during IP setup: {e}")
         finally:
             self.lock_buttons = False
-
-    def set_home_directory(self):
-        """Let the user explicitly set the base directory for all file dialogs."""
-        # Start at the currently set home, or fallback to the OS real home
-        start_dir = getattr(self, 'user_home_dir', "")
-        if not start_dir or not os.path.exists(start_dir):
-            start_dir = FileSelectionHelper.get_real_home()
             
-        new_home = FileSelectionHelper.select_directory(
-            self.root, 
-            "Select Master Home Directory", 
-            start_dir
-        )
-        
-        if new_home:
-            self.user_home_dir = new_home
-            # Immediately override all individual trackers
-            self.last_firmware_dir = new_home
-            self.last_fip_dir = new_home
-            self.last_eeprom_dir = new_home
-            
-            # Save the new configuration
-            self.save_config()
-            self.log_message(f"🏠 Master home directory updated to: {new_home}")
-
-    def stop_operation(self):
-            """Stops any running operations, cleans up, and restarts the application."""
-            import sys
-            
-            self.log_message("\n STOP OPERATION REQUESTED! Cleaning up...")
-            self.abort_requested = True  # Signal any loops to break
-            
-            # 1. Force close serial connections so the port is free for the next instance
-            try:
-                cleanup_all_serial_connections()
-            except Exception:
-                pass
-                
-            # 2. Gracefully stop the HTTP server so port 80 is freed up
-            try:
-                stop_server_dmi(self.log_message)
-            except Exception:
-                pass
-                
-            # 3. Save current configurations before rebooting
-            try:
-                self.save_config()
-            except Exception:
-                pass
-                
-            self.log_message("Restarting application in 2 seconds...")
-            self.root.update()  # Force the UI to update so the user sees the message
-            time.sleep(2)
-            
-            # 4. Restart the app by replacing the current process with a new one
-            os.execv(sys.executable, [sys.executable] + sys.argv)
-                
 
 def main():
     """Main entry point for the application"""
