@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-=======
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 import urllib3
 import asyncio
@@ -718,4 +716,3 @@ async def reset_uboot(callback_output, serial_device):
     finally:
         if 'ser' in locals() and ser.is_open:
             ser.close()
->>>>>>> fe3eccc (Fedora Support & Fix dialog change)
