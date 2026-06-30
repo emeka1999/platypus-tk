@@ -25,10 +25,14 @@ except ImportError:
     MULTI_UNIT_AVAILABLE = False
     print("Multi-unit functionality not available (extra.py not found)")
 <<<<<<< HEAD
+<<<<<<< HEAD
 VERSION = "6.1.2"  
 =======
 VERSION = "6.1.1"  
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+VERSION = "6.1.2"  
+>>>>>>> a444359 (Added Set home directory)
 # --- Embedded DMI Scripts ---
 
 # FRU_flash_v2.sh content
@@ -518,6 +522,9 @@ class FileSelectionHelper:
 
     @staticmethod
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a444359 (Added Set home directory)
     def get_real_home():
         """Gets the actual user's home directory, even if running under sudo"""
         import pwd
@@ -532,6 +539,7 @@ class FileSelectionHelper:
                 pass
         
         # Standard home expansion
+<<<<<<< HEAD
         home = os.path.expanduser("~")
         
         # If it resolved to root, try to guess the real user directory in /home
@@ -558,11 +566,30 @@ class FileSelectionHelper:
         """Return last_dir if valid, otherwise default to /home"""
         if last_dir and os.path.isdir(last_dir):
             return last_dir
+=======
+>>>>>>> a444359 (Added Set home directory)
         home = os.path.expanduser("~")
+        
+        # If it resolved to root, try to guess the real user directory in /home
         if home == "/root" or not os.path.isdir(home):
+            try:
+                users = [d for d in os.listdir("/home") if os.path.isdir(os.path.join("/home", d))]
+                if len(users) == 1:  # If there's only one user on the machine, it's a safe bet
+                    return os.path.join("/home", users[0])
+            except Exception:
+                pass
             return "/home"
+            
         return home
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+
+    @staticmethod
+    def _default_dir(last_dir):
+        """Return last_dir if valid, otherwise default to the real user's home"""
+        # Ensure we don't accidentally default to the root directory
+        if last_dir and os.path.isdir(last_dir) and last_dir != "/root":
+            return last_dir
+        return FileSelectionHelper.get_real_home()
 
     @staticmethod
     def select_file(parent, title, last_dir, file_filter=None):
@@ -612,12 +639,18 @@ class FileSelectionHelper:
         dialog.resizable(True, True)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a444359 (Added Set home directory)
         # Initialize to the real home if the default is empty or root
         if not default_value or default_value == "/root":
             default_value = FileSelectionHelper.get_real_home()
 
+<<<<<<< HEAD
 =======
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+>>>>>>> a444359 (Added Set home directory)
         path_var = ctk.StringVar(value=default_value)
 
         main_frame = ctk.CTkFrame(dialog)
@@ -637,6 +670,7 @@ class FileSelectionHelper:
             parent.update_idletasks()
             parent.lift()
 <<<<<<< HEAD
+<<<<<<< HEAD
             initial = FileSelectionHelper._default_dir(path_var.get())
             if "directory" in message.lower():
                 result = filedialog.askdirectory(title=f"Browse for {title}", initialdir=initial)
@@ -655,19 +689,30 @@ class FileSelectionHelper:
         # New quick-action Home button
         ctk.CTkButton(browse_frame, text="🏠 Home", command=set_to_home, width=100, fg_color="#444444", hover_color="#666666").pack(side="right")
 =======
+=======
+            initial = FileSelectionHelper._default_dir(path_var.get())
+>>>>>>> a444359 (Added Set home directory)
             if "directory" in message.lower():
-                result = filedialog.askdirectory(title=f"Browse for {title}",
-                                                 initialdir=FileSelectionHelper._default_dir(default_value))
+                result = filedialog.askdirectory(title=f"Browse for {title}", initialdir=initial)
                 if result:
                     path_var.set(result)
             else:
-                result = filedialog.askopenfilename(title=f"Browse for {title}",
-                                                    initialdir=FileSelectionHelper._default_dir(default_value))
+                result = filedialog.askopenfilename(title=f"Browse for {title}", initialdir=initial)
                 if result:
                     path_var.set(result)
 
+<<<<<<< HEAD
         ctk.CTkButton(browse_frame, text="Browse...", command=browse_for_path, width=100).pack(side="right")
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+        def set_to_home():
+            """Quick action to set the path to the real home directory"""
+            path_var.set(FileSelectionHelper.get_real_home())
+
+        ctk.CTkButton(browse_frame, text="Browse...", command=browse_for_path, width=100).pack(side="right", padx=(5, 0))
+        # New quick-action Home button
+        ctk.CTkButton(browse_frame, text="🏠 Home", command=set_to_home, width=100, fg_color="#444444", hover_color="#666666").pack(side="right")
+>>>>>>> a444359 (Added Set home directory)
 
         result_path = []
 
@@ -862,10 +907,14 @@ class FlashAllWindow(ctk.CTkToplevel):
             
             if filename not in allowed_fip_files:
 <<<<<<< HEAD
+<<<<<<< HEAD
                 self.log_message(f" Invalid FIP file: '{filename}'")
 =======
                 self.log_message(f"❌ Invalid FIP file: '{filename}'")
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+                self.log_message(f" Invalid FIP file: '{filename}'")
+>>>>>>> a444359 (Added Set home directory)
                 self.log_message(f"Allowed files: {', '.join(allowed_fip_files)}")
                 
                 from tkinter import messagebox
@@ -909,10 +958,14 @@ class FlashAllWindow(ctk.CTkToplevel):
             
             if filename != "fru.bin":
 <<<<<<< HEAD
+<<<<<<< HEAD
                 self.log_message(f" Invalid EEPROM file: '{filename}'")
 =======
                 self.log_message(f"❌ Invalid EEPROM file: '{filename}'")
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+                self.log_message(f" Invalid EEPROM file: '{filename}'")
+>>>>>>> a444359 (Added Set home directory)
                 self.log_message(f"Required file: 'fru.bin'")
                 
                 from tkinter import messagebox
@@ -1008,10 +1061,14 @@ class PlatypusApp:
         # Create main window with specific class name
         self.root = ctk.CTk(className="PlatypusApp")  # Set class name during creation
 <<<<<<< HEAD
+<<<<<<< HEAD
         self.root.title("Platypus BMC Management - 6.1.2")
 =======
         self.root.title("Platypus BMC Management - 6.1.1")
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+        self.root.title("Platypus BMC Management - 6.1.2")
+>>>>>>> a444359 (Added Set home directory)
         self.root.geometry("800x850")  # Adjusted to fit 1080p
         
         # Initialize variables
@@ -1239,6 +1296,9 @@ class PlatypusApp:
         self.fru_mfg = ctk.StringVar(value="Simply NUC")
         self.sku_list = [] # Will be populated by load_or_create_skus
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a444359 (Added Set home directory)
         # Master Home Directory
         self.user_home_dir = ""
 
@@ -1687,9 +1747,13 @@ class PlatypusApp:
                         self.last_fip_dir = config.get("last_fip_dir", os.path.expanduser("~"))
                         self.last_eeprom_dir = config.get("last_eeprom_dir", os.path.expanduser("~"))
 <<<<<<< HEAD
+<<<<<<< HEAD
                         self.user_home_dir = config.get("user_home_dir", "")
 =======
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+                        self.user_home_dir = config.get("user_home_dir", "")
+>>>>>>> a444359 (Added Set home directory)
                         
                         # Load Flash All specific paths
                         self.last_flash_all_folder = config.get("last_flash_all_folder", "")
@@ -1798,11 +1862,17 @@ class PlatypusApp:
             "last_asmid": self.fru_asmid.get(),
             "last_mfg": self.fru_mfg.get(),
 <<<<<<< HEAD
+<<<<<<< HEAD
 
             # Save Master home
             "user_home_dir": getattr(self, 'user_home_dir', ""),
 =======
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+
+            # Save Master home
+            "user_home_dir": getattr(self, 'user_home_dir', ""),
+>>>>>>> a444359 (Added Set home directory)
         }
         try:
             with open(self.CONFIG_FILE, 'w') as config_file:
@@ -1966,11 +2036,16 @@ class PlatypusApp:
             ("Flash All", self.on_flash_all),
             ("Multi-Unit Flash", self.open_multi_unit_flash),  # NEW BUTTON
 <<<<<<< HEAD
+<<<<<<< HEAD
             ("Reboot to Bootloader", self.reboot_to_bootloader),
             ("Set Home Directory", self.set_home_directory)
 =======
             ("Reboot to Bootloader", self.reboot_to_bootloader)
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+            ("Reboot to Bootloader", self.reboot_to_bootloader),
+            ("Set Home Directory", self.set_home_directory)
+>>>>>>> a444359 (Added Set home directory)
         ]
         
         for i, (text, command) in enumerate(ops):
@@ -2306,10 +2381,14 @@ class PlatypusApp:
             # If no interfaces found, show error and keep current
             if not ips:
 <<<<<<< HEAD
+<<<<<<< HEAD
                 self.log_message(" No network interfaces found")
 =======
                 self.log_message("❌ No network interfaces found")
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+                self.log_message(" No network interfaces found")
+>>>>>>> a444359 (Added Set home directory)
                 return
                 
             # Update the dropdown values with all detected IPs
@@ -2336,10 +2415,14 @@ class PlatypusApp:
                     
         except Exception as e:
 <<<<<<< HEAD
+<<<<<<< HEAD
             self.log_message(f" Error updating network interfaces: {e}")
 =======
             self.log_message(f"❌ Error updating network interfaces: {e}")
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+            self.log_message(f" Error updating network interfaces: {e}")
+>>>>>>> a444359 (Added Set home directory)
             # Don't crash - just keep whatever was there before
 
     def log_message(self, message):
@@ -3406,6 +3489,9 @@ class PlatypusApp:
         finally:
             self.lock_buttons = False
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> a444359 (Added Set home directory)
 
     def set_home_directory(self):
         """Let the user explicitly set the base directory for all file dialogs."""
@@ -3430,8 +3516,11 @@ class PlatypusApp:
             # Save the new configuration
             self.save_config()
             self.log_message(f"🏠 Master home directory updated to: {new_home}")
+<<<<<<< HEAD
 =======
 >>>>>>> fe3eccc (Fedora Support & Fix dialog change)
+=======
+>>>>>>> a444359 (Added Set home directory)
             
 
 def main():
