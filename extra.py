@@ -273,7 +273,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
     def select_firmware_folder(self):
         """Select firmware folder"""
-        from main import FileSelectionHelper
+        from platypus import FileSelectionHelper
         folder = FileSelectionHelper.select_directory(self, "Select Firmware Folder", 
                                                      self.firmware_folder.get() or os.path.expanduser("~"))
         if folder:
@@ -282,7 +282,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
     def select_fip_file(self):
         """Select FIP file with validation"""
-        from main import FileSelectionHelper
+        from platypus import FileSelectionHelper
         file_path = FileSelectionHelper.select_file(self, "Select FIP File", 
                                                    os.path.dirname(self.fip_file.get()) or os.path.expanduser("~"),
                                                    "FIP files (fip-snuc-nanobmc.bin) | fip-snuc-nanobmc.bin")
@@ -295,7 +295,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
     def select_eeprom_file(self):
         """Select EEPROM file with validation"""
-        from main import FileSelectionHelper
+        from platypus import FileSelectionHelper
         file_path = FileSelectionHelper.select_file(self, "Select EEPROM File", 
                                                    os.path.dirname(self.eeprom_file.get()) or os.path.expanduser("~"),
                                                    "FRU files (fru.bin) | fru.bin")

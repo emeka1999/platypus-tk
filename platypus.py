@@ -17,6 +17,14 @@ import threading
 import glob
 from tkinter import messagebox
 from tkinter import filedialog
+import pwd
+
+if 'SUDO_USER' in os.environ and not os.environ.get('XAUTHORITY'):
+    try:
+        user_info = pwd.getpwnam(os.environ['SUDO_USER'])
+        os.environ['XAUTHORITY'] = os.path.join(user_info.pw_dir, '.Xauthority')
+    except KeyError:
+        pass
 
 try:
     from extra import create_multi_unit_window
@@ -843,8 +851,7 @@ class FlashAllWindow(ctk.CTkToplevel):
             if hasattr(app, 'save_config'):
                 app.save_config()
             
-            self.log_message(f"✓ Valid FIP file selected: {filename}")
-
+            
     def select_eeprom_file(self):
         """Select EEPROM file for flashing FRU with validation"""
         # Start with last selected EEPROM file directory or fall back to general EEPROM dir
@@ -1326,6 +1333,15 @@ class PlatypusApp:
                         self.log_message, 
                         self.serial_device.get()
                     ))
+
+                    self.log_message("Rebooting system after EEPROM flash...")
+                    try:
+                        asyncio.run(bmc.reboot_bmc(
+                            self.log_message,
+                            self.serial_device.get()
+                        ))
+                    except Exception as reboot_err:
+                        self.log_message(f"Warning: Reboot command failed: {reboot_err}")
                 elif bmc_type != 1:
                     self.log_message(f"\n[STEP 5/{total_steps}] Skipping EEPROM Flash (as requested).") 
                     try:

@@ -1,0 +1,15 @@
+# GUI Framework
+customtkinter
+
+# Hardware & Serial Communication
+pyserial
+
+# Redfish API interactions
+redfish
+urllib3
+
+# System and Process Management
+psutil
+
+# Network Interface Detection (Optional but highly recommended)
+netifaces
