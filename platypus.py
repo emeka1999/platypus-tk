@@ -19,12 +19,101 @@ from tkinter import messagebox
 from tkinter import filedialog
 import pwd
 
-if 'SUDO_USER' in os.environ and not os.environ.get('XAUTHORITY'):
+def _find_x_auth_file():
+    """Scan running X/XWayland processes for an explicit '-auth <file>'
+    argument. Different desktop environments put this file in different
+    places -- GNOME/mutter uses a randomly-named file under
+    XDG_RUNTIME_DIR, KDE varies, some setups still use ~/.Xauthority --
+    so reading it straight from the running server's own command line
+    works regardless of which convention is in play, instead of guessing
+    a single hardcoded path.
+    """
     try:
-        user_info = pwd.getpwnam(os.environ['SUDO_USER'])
-        os.environ['XAUTHORITY'] = os.path.join(user_info.pw_dir, '.Xauthority')
-    except KeyError:
+        for proc in psutil.process_iter(['name', 'cmdline']):
+            name = (proc.info.get('name') or '').lower()
+            if name not in ('xwayland', 'xorg', 'x'):
+                continue
+            cmdline = proc.info.get('cmdline') or []
+            for i, arg in enumerate(cmdline):
+                if arg == '-auth' and i + 1 < len(cmdline):
+                    candidate = cmdline[i + 1]
+                    if os.path.isfile(candidate):
+                        return candidate
+    except Exception:
         pass
+    return None
+
+
+def _grant_root_x_access(sudo_user, display):
+    """Best-effort: ask the owning user's own session to explicitly allow
+    root to connect, via xhost. This is what actually fixes things on
+    compositors that run XWayland with no -auth file at all -- niri (via
+    xwayland-satellite), sway, and other wlroots-based setups -- where
+    access is otherwise restricted purely by UID and there's no cookie
+    file to point XAUTHORITY at in the first place. xhost has to be run
+    as the already-authorized user, not as root, so this shells out via
+    'sudo -u' back to the original user.
+    """
+    try:
+        result = subprocess.run(
+            ['sudo', '-u', sudo_user, 'env', f'DISPLAY={display}',
+             'xhost', '+si:localuser:root'],
+            capture_output=True, text=True, timeout=5
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
+def _ensure_x11_access_for_root():
+    """Make the GUI able to open when this app is run as root via sudo,
+    regardless of desktop environment or compositor. Tk itself is an
+    X11-only toolkit -- under Wayland it can only work through XWayland --
+    and root has no automatic permission to connect to another user's
+    display. Three approaches are layered since no single one covers
+    every setup:
+
+      1. Point XAUTHORITY at the invoking user's own ~/.Xauthority, if it
+         exists (classic X11, and some XWayland setups).
+      2. If that file doesn't exist, look at the actual running
+         X/XWayland process for an explicit -auth <file> argument and use
+         that instead (covers GNOME/mutter, KDE/kwin, and similar where
+         the cookie file lives somewhere other than ~/.Xauthority).
+      3. Regardless of whether either of the above found anything, also
+         try 'xhost +si:localuser:root' as the invoking user -- this is
+         the one that actually works on compositors that run XWayland
+         with no auth file at all (niri, sway, other wlroots-based
+         setups).
+
+    Every step is best-effort and silently continues on failure. If
+    nothing here works, CTk() will still raise TclError, and __init__
+    catches that with an actionable message instead of a raw traceback.
+    """
+    if os.geteuid() != 0 or 'SUDO_USER' not in os.environ:
+        return
+
+    sudo_user = os.environ['SUDO_USER']
+    display = os.environ.get('DISPLAY', ':0')
+
+    if not os.environ.get('XAUTHORITY'):
+        try:
+            user_home = pwd.getpwnam(sudo_user).pw_dir
+            candidate = os.path.join(user_home, '.Xauthority')
+            if os.path.isfile(candidate):
+                os.environ['XAUTHORITY'] = candidate
+            else:
+                found = _find_x_auth_file()
+                if found:
+                    os.environ['XAUTHORITY'] = found
+        except KeyError:
+            pass
+
+    _grant_root_x_access(sudo_user, display)
+
+
+_ensure_x11_access_for_root()
 
 try:
     from extra import create_multi_unit_window
@@ -939,7 +1028,6 @@ class FlashAllWindow(ctk.CTkToplevel):
     
     def run_flash_sequence(self, do_flash_fru):
         """Execute the full flashing sequence by calling the main app's method"""
-        # Get required parameters
         firmware_folder = self.firmware_folder.get()
         fip_file = self.fip_file.get()
         eeprom_file = self.eeprom_file.get() if hasattr(self, 'eeprom_file') else None
@@ -964,9 +1052,22 @@ class PlatypusApp:
         ctk.set_default_color_theme("blue")
 
         # Create main window with specific class name
-        self.root = ctk.CTk(className="PlatypusApp")  # Set class name during creation
+        try:
+            self.root = ctk.CTk(className="PlatypusApp")  # Set class name during creation
+        except tk.TclError as e:
+            if os.geteuid() == 0 and 'SUDO_USER' in os.environ:
+                print(
+                    "\nCould not open a display while running as root "
+                    f"(underlying error: {e}).\n"
+                    "Automatic fixes were attempted (XAUTHORITY detection, "
+                    "xhost) but didn't resolve it on this system.\n"
+                    "As a manual workaround, run this once as your normal "
+                    f"user ({os.environ['SUDO_USER']}) before using sudo:\n"
+                    "    xhost +si:localuser:root\n"
+                )
+            raise
         self.root.title("Platypus BMC Management - 6.1.2")
-        self.root.geometry("800x850")  # Adjusted to fit 1080p
+        self.root.geometry("800x850")  
         
         # Initialize variables
         self._init_variables()
