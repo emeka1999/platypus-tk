@@ -74,6 +74,13 @@ def _pyte_color_to_hex(value, default):
     return _NAMED_COLORS.get(value, default)
 
 
+def _is_light(hex_color):
+    """Rough perceived-luminance check, used only to decide which way to
+    nudge a foreground/background color collision (see _tag_for)."""
+    r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 140
+
+
 class TerminalView:
     """
     Renders a fixed-size VT100 terminal (via pyte) into a CTkTextbox.
@@ -90,7 +97,7 @@ class TerminalView:
 
     DEFAULT_FG = "#e5e5e5"
 
-    def __init__(self, textbox, columns=SOL_TERM_COLUMNS, rows=SOL_TERM_ROWS):
+    def __init__(self, textbox, columns=SOL_TERM_COLUMNS, rows=SOL_TERM_ROWS, widget_bg="#1e1e1e"):
         self.textbox = textbox
         # CTkTextbox.tag_config() rejects a 'font' option (DPI-scaling
         # concern), so bold tags are configured on the real underlying
@@ -98,9 +105,21 @@ class TerminalView:
         self._raw_textbox = getattr(textbox, "_textbox", textbox)
         self.columns = columns
         self.rows = rows
+        # The widget's actual current background, used only to catch a
+        # foreground/background color collision that would otherwise render
+        # genuinely invisible text (see _tag_for). Kept in sync via set_bg()
+        # whenever the panel switches modes/background color.
+        self.widget_bg = widget_bg
         self.screen = pyte.Screen(columns, rows)
         self.stream = pyte.Stream(self.screen)
         self._known_tags = set()
+        self._redraw(force=True)
+
+    def set_bg(self, color):
+        """Update the known widget background and force a full redraw, so
+        the invisible-text safeguard in _tag_for stays accurate after a
+        mode switch changes the console's background color."""
+        self.widget_bg = color
         self._redraw(force=True)
 
     def reset(self):
@@ -120,6 +139,17 @@ class TerminalView:
         bg = _pyte_color_to_hex(char.bg, None)
         if char.reverse:
             fg, bg = (bg or "#000000"), (fg)
+
+        # Minimum-contrast safeguard: some remote consoles produce a
+        # degenerate same-color state for a "highlighted" cell (e.g. only
+        # changing the background and leaving foreground as whatever it
+        # already was), which would otherwise render completely invisible
+        # text instead of a visible highlight. Nudge the foreground to
+        # guarantee it's never literally the same color as what it sits on.
+        effective_bg = bg if bg is not None else self.widget_bg
+        if fg.lower() == effective_bg.lower():
+            fg = "#000000" if _is_light(effective_bg) else "#ffffff"
+
         name = f"pt_{fg}_{bg}_{int(char.bold)}_{int(char.underscore)}"
         if name not in self._known_tags:
             opts = {"foreground": fg}
@@ -179,8 +209,29 @@ class SerialBackend:
         self.ser = None
         self._stop = threading.Event()
         self._thread = None
+        # Incremental, not one-shot-per-chunk: a multi-byte UTF-8 character
+        # can easily land split across two separate reads (bytes trickle in
+        # over serial rather than arriving as a whole), and decoding each
+        # chunk independently would corrupt exactly those characters - which
+        # is what BIOS/UEFI box-drawing borders are made of. An incremental
+        # decoder buffers a trailing partial sequence until the rest arrives.
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     def start(self, on_data, on_error):
+        if not hasattr(serial, "Serial"):
+            # Common gotcha: PyPI has two different packages that both
+            # import as `serial` - "pyserial" (what this app needs) and an
+            # unrelated package literally called "serial". If the wrong one
+            # got installed, `serial.Serial` doesn't exist and every open
+            # fails with a confusing AttributeError instead of a clear
+            # "wrong package" message.
+            on_error(
+                "The installed 'serial' package is not pyserial (it has no "
+                "Serial class). Fix with:\n"
+                "  pip uninstall serial\n"
+                "  pip install pyserial"
+            )
+            return False
         try:
             self.ser = serial.Serial(self.device, baudrate=self.baudrate, timeout=0.2)
             self.ser.dtr = True
@@ -194,7 +245,7 @@ class SerialBackend:
                     if self.ser.in_waiting:
                         chunk = self.ser.read(self.ser.in_waiting)
                         if chunk:
-                            on_data(chunk.decode('utf-8', errors='ignore'))
+                            on_data(self._decoder.decode(chunk))
                 except Exception as e:
                     on_error(f"Serial read error: {e}")
                     return
@@ -286,8 +337,12 @@ class SolBackend:
                 )
                 self._channel.settimeout(0.1)
 
-                # Preserve UTF-8 characters split across separate network
-                # reads instead of turning them into replacement glyphs.
+                # Incremental UTF-8: this BIOS/BMC's console genuinely
+                # emits real UTF-8 box-drawing characters (confirmed by
+                # testing - decoding those bytes as cp437 instead produces
+                # exactly the mojibake seen when that was tried), and
+                # decoding incrementally (not per-chunk) avoids corrupting
+                # a multi-byte character that lands split across two reads.
                 decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
                 while not self._stop.is_set():
@@ -388,7 +443,7 @@ class EmbeddedConsole(ctk.CTkFrame):
         self._queue = queue.Queue()
 
         self._build_ui()
-        self._term = TerminalView(self.output)
+        self._term = TerminalView(self.output, widget_bg=self._BG_FOR_MODE[self.mode])
         self._poll_queue()
 
     def _build_ui(self):
@@ -559,6 +614,7 @@ class EmbeddedConsole(ctk.CTkFrame):
         self.disconnect()
         self.mode = value
         self.output.configure(fg_color=self._BG_FOR_MODE[value])
+        self._term.set_bg(self._BG_FOR_MODE[value])
         if was_connected:
             self.connect()
         else:
