@@ -1,10 +1,11 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox
-import asyncio, glob, bmc, json, os, time, psutil, threading, subprocess
+import asyncio, glob, bmc, json, os, time, psutil, threading, subprocess, shutil
 import serial
 from utils import *
 from network import *
+from embedded_console import EmbeddedConsole
 from functools import partial
 from threading import Thread
 import tempfile
@@ -1067,7 +1068,7 @@ class PlatypusApp:
                 )
             raise
         self.root.title("Platypus BMC Management - 6.1.2")
-        self.root.geometry("800x850")  
+        self.root.geometry("1600x850")
         
         # Initialize variables
         self._init_variables()
@@ -1094,9 +1095,25 @@ class PlatypusApp:
         # Create main container frame for the UI
         self.main_container = ctk.CTkFrame(self.root)
         self.main_container.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Use main_container as controls_frame (no split layout anymore)
-        self.controls_frame = self.main_container
+
+        # Split into a left column (all existing controls) and a right
+        # column holding the embedded Serial/SOL console panel.
+        self.main_container.grid_rowconfigure(0, weight=1)
+        self.main_container.grid_columnconfigure(0, weight=1)
+        self.main_container.grid_columnconfigure(1, weight=1, minsize=480)
+
+        self.controls_frame = ctk.CTkFrame(self.main_container)
+        self.controls_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+
+        self.console_panel = EmbeddedConsole(
+            self.main_container,
+            get_serial_device=self.serial_device.get,
+            get_bmc_ip=self.bmc_ip.get,
+            get_password=self.password.get,
+            get_username=self.username.get,
+            log=self.log_message,
+        )
+        self.console_panel.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
         
         # Create UI sections in the controls frame
         self.create_connection_section()
@@ -1236,25 +1253,25 @@ class PlatypusApp:
         """Handle window resize events to maintain proper layout"""
         # Only process if it's the main window being resized
         if event.widget == self.root:
-            # Maintain a reasonable minimum size
-            if event.width < 900:
-                self.root.geometry(f"900x{event.height}")
+            # Maintain a reasonable minimum size (wider now that the
+            # console panel needs real room to be usable)
+            if event.width < 1100:
+                self.root.geometry(f"1100x{event.height}")
             if event.height < 600:
                 self.root.geometry(f"{event.width}x600")
                 
-            # Adjust column weights if needed
+            # Adjust column minsizes to keep a roughly even, console-friendly
+            # split as the window is resized. Column 0 = controls (left),
+            # column 1 = the embedded Serial/SOL console (right).
             try:
-                # Get current width
                 total_width = self.main_container.winfo_width()
                 
-                # Adjust column weights to maintain relative sizes
                 if total_width > 0:
-                    # We want console to be about 1/4 of the total width
-                    console_width = int(total_width * 0.28)
+                    console_width = max(480, int(total_width * 0.45))
                     controls_width = total_width - console_width
                     
-                    self.main_container.columnconfigure(0, minsize=console_width)
-                    self.main_container.columnconfigure(1, minsize=controls_width)
+                    self.main_container.columnconfigure(0, minsize=controls_width)
+                    self.main_container.columnconfigure(1, minsize=console_width)
             except (AttributeError, tk.TclError):
                 # This can happen during initialization or teardown
                 pass
@@ -1662,7 +1679,14 @@ class PlatypusApp:
         # Cancel cleanup timer
         if self.cleanup_timer:
             self.root.after_cancel(self.cleanup_timer)
-        
+
+        # Disconnect the embedded console panel (serial or SOL SSH session)
+        try:
+            if hasattr(self, "console_panel"):
+                self.console_panel.disconnect()
+        except Exception:
+            pass
+
         # Clean up all serial connections
         for conn in self.active_serial_connections:
             try:
@@ -1784,12 +1808,13 @@ class PlatypusApp:
             ("Set BMC IP", self.set_bmc_ip),
             ("Power ON Host", self.power_on_host),
             ("Reboot BMC", self.reboot_bmc),
-            ("Factory Reset", self.factory_reset)
+            ("Factory Reset", self.factory_reset),
         ]
         
         for i, (text, command) in enumerate(ops):
             row, col = divmod(i, 3)
-            ctk.CTkButton(op_frame, text=text, command=command, height=28).grid(row=row, column=col, padx=3, pady=3, sticky="ew")
+            button = ctk.CTkButton(op_frame, text=text, command=command, height=28)
+            button.grid(row=row, column=col, padx=3, pady=3, sticky="ew")
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
 
@@ -1811,7 +1836,9 @@ class PlatypusApp:
             ("Flash All", self.on_flash_all),
             ("Multi-Unit Flash", self.open_multi_unit_flash),  # NEW BUTTON
             ("Reboot to Bootloader", self.reboot_to_bootloader),
-            ("Set Home Directory", self.set_home_directory)
+            ("Set Home Directory", self.set_home_directory),
+            ("Open External Console", self.open_minicom_console),
+            ("Stop Operation", self.stop_operation),
         ]
         
         for i, (text, command) in enumerate(ops):
@@ -1823,6 +1850,9 @@ class PlatypusApp:
             if text == "Multi-Unit Flash":
                 button.configure(fg_color="#2B5CE6", hover_color="#1E3A8A", 
                             text_color="white", font=ctk.CTkFont(weight="bold"))
+            elif text == "Stop Operation":
+                self.stop_button = button
+                button.configure(fg_color="#cc0000", hover_color="#aa0000")
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
 
@@ -1859,26 +1889,14 @@ class PlatypusApp:
         self.log_box.pack(padx=10, pady=5, fill="x")
 
     def create_progress_section(self):
-            """Create the progress section with the console and stop buttons"""
+            """Create the progress section (just the progress bar now - the
+            Console and Stop Operation buttons live in the BMC operations
+            row above, inside the tabview)."""
             section = ctk.CTkFrame(self.controls_frame)
             section.pack(fill="x", pady=5)
             
             progress_frame = ctk.CTkFrame(section)
             progress_frame.pack(fill="x", padx=10, pady=5)
-            
-            # Console button
-            ctk.CTkButton(progress_frame, text="Console", command=self.open_minicom_console, height=28).pack(side="left", padx=5)
-            
-            # NEW: Stop Operation Button (Styled Red)
-            self.stop_button = ctk.CTkButton(
-                progress_frame, 
-                text="Stop Operation", 
-                command=self.stop_operation, 
-                height=28,
-                fg_color="#cc0000",      # Red color
-                hover_color="#aa0000"    # Darker red on hover
-            )
-            self.stop_button.pack(side="left", padx=5)
             
             self.progress = ctk.CTkProgressBar(progress_frame)
             self.progress.pack(side="left", expand=True, fill="x", padx=5)
@@ -2218,28 +2236,24 @@ class PlatypusApp:
             self.log_message("No serial device selected. Please select a device.")
             return
         try:
-            self.log_message(f"Launching Minicom on {self.serial_device.get()}...")
-            
+            device = self.serial_device.get()
+            self.log_message(f"Launching Minicom on {device}...")
+
             # Clean up any existing minicom processes first
             self.cleanup_minicom_processes()
-            
-            # Try terminator first (as requested)
-            try:
-                process = subprocess.Popen(
-                    ["terminator", "-e", f"minicom -D {self.serial_device.get()}"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                self.log_message(f"Minicom launched successfully (PID: {process.pid})")
-            except Exception:
-                # Fall back to xterm if terminator fails
-                process = subprocess.Popen(
-                    ["xterm", "-e", f"minicom -D {self.serial_device.get()}"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                self.log_message(f"Minicom launched in xterm (PID: {process.pid})")
-                
+
+            if not shutil.which("minicom"):
+                self.log_message("minicom is not installed. Install it with: sudo apt install minicom")
+                return
+
+            process = launch_in_terminal(
+                f"minicom -D {device}",
+                title=f"Console - {device}",
+                log=self.log_message,
+            )
+            if process is None:
+                self.log_message(f"Error launching Minicom: no working terminal emulator found on this system.")
+
         except Exception as e:
             self.log_message(f"Error launching Minicom: {e}")
 
@@ -2855,15 +2869,15 @@ class PlatypusApp:
                 fw_content = fw_file.read()
                 self.log_message(f"Starting {update_type} update process...")
                 is_bmc_file = "bmc" in self.flash_file.lower()
+                update_func = bmc.bmc_update if is_bmc_file else bmc.bios_update
 
-                await bmc.bios_update(
+                await update_func(
                     self.username.get(),
                     self.password.get(),
                     self.bmc_ip.get(),
                     fw_content,
                     self.update_progress,
                     self.log_message,
-                    is_bmc=is_bmc_file
                 )
         except Exception as e:
             self.log_message(f"Error during update: {e}")

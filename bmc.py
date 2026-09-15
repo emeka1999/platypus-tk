@@ -9,10 +9,71 @@ import threading
 
 from utils import monitor_task, read_serial_data
 from network import stop_server, start_server
-import setproctitle
-setproctitle.setproctitle("platypus")
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# --- Boot override / power cycle via Redfish (ComputerSystem) ---
+# Mirrors the logic used in the standalone Redfish control panel's Power tab
+# (discover the first Systems member, then PATCH Boot.* or POST
+# Actions/ComputerSystem.Reset against it).
+
+def _discover_system_endpoint(redfish_client):
+    resp = redfish_client.get("/redfish/v1/Systems")
+    if resp.status != 200:
+        raise RuntimeError(f"Failed to read /redfish/v1/Systems (HTTP {resp.status})")
+    members = resp.dict.get("Members", [])
+    if not members:
+        raise RuntimeError("No ComputerSystem members found under /redfish/v1/Systems.")
+    return members[0]["@odata.id"]
+
+
+def set_boot_override(bmc_user, bmc_pass, bmc_ip, target, enabled="Once"):
+    """Set the next-boot override target (e.g. 'Pxe', 'Cd', 'BiosSetup') via
+    Redfish. Blocking/synchronous - call from a background thread."""
+    redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
+    redfish_client.login()
+    try:
+        system_uri = _discover_system_endpoint(redfish_client)
+        body = {"Boot": {"BootSourceOverrideTarget": target, "BootSourceOverrideEnabled": enabled}}
+        resp = redfish_client.patch(system_uri, body=body)
+        if resp.status not in (200, 202, 204):
+            raise RuntimeError(f"Boot override PATCH failed (HTTP {resp.status}): {resp.text}")
+        return f"Next boot set to {target} ({enabled})."
+    finally:
+        redfish_client.logout()
+
+
+def _system_reset(bmc_user, bmc_pass, bmc_ip, reset_type, success_message):
+    """Shared implementation for the power-action helpers below. Blocking/
+    synchronous - call from a background thread."""
+    redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
+    redfish_client.login()
+    try:
+        system_uri = _discover_system_endpoint(redfish_client)
+        resp = redfish_client.post(f"{system_uri}/Actions/ComputerSystem.Reset", body={"ResetType": reset_type})
+        if resp.status not in (200, 202, 204):
+            raise RuntimeError(f"{reset_type} request failed (HTTP {resp.status}): {resp.text}")
+        return success_message
+    finally:
+        redfish_client.logout()
+
+
+def power_on_host(bmc_user, bmc_pass, bmc_ip):
+    """Power on the host via Redfish ComputerSystem.Reset (ResetType=On)."""
+    return _system_reset(bmc_user, bmc_pass, bmc_ip, "On", "Power on command sent.")
+
+
+def power_off_host(bmc_user, bmc_pass, bmc_ip):
+    """Force power off the host via Redfish ComputerSystem.Reset
+    (ResetType=ForceOff)."""
+    return _system_reset(bmc_user, bmc_pass, bmc_ip, "ForceOff", "Power off command sent.")
+
+
+def reboot_host(bmc_user, bmc_pass, bmc_ip):
+    """Force-restart the host via Redfish ComputerSystem.Reset
+    (ResetType=ForceRestart)."""
+    return _system_reset(bmc_user, bmc_pass, bmc_ip, "ForceRestart", "Reboot command sent.")
+
 
 # Updates the BMC firmware through redfish 
 async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, callback_output):
@@ -112,9 +173,6 @@ async def flasher(flash_file, my_ip, callback_progress, callback_output, serial_
     port = 80
 
     httpd = start_server(directory, port, callback_output)
-    if not httpd:
-        raise Exception("Local HTTP server failed to start. Aborting U-Boot flash.")
-    
     callback_progress(0.2)
 
     ser = serial.Serial(serial_device, 115200, timeout=1)
@@ -164,9 +222,6 @@ async def flash_eeprom(flash_file, my_ip, callback_progress, callback_output, se
 
     # Start HTTP server
     httpd = start_server(directory, port, callback_output)
-    if not httpd:
-        raise Exception("Local HTTP server failed to start. Aborting EEPROM flash.")
-        
     callback_progress(0.2)
 
     ser = serial.Serial(serial_device, 115200, timeout=1)
@@ -252,12 +307,8 @@ async def flash_emmc(bmc_ip, directory, my_ip, dd_value, callback_progress, call
     httpd = None
     ser = None  # Initialize serial connection variable
 
-# Around line 186 and 242
     try:
         httpd = start_server(directory, port, callback_output)
-        if not httpd:
-            raise Exception("Local HTTP server failed to start. Check if port 80 is busy. Aborting eMMC flash.")
-            
         callback_progress(0.10)
 
         ser = serial.Serial(serial_device, 115200, timeout=0.1)
@@ -337,9 +388,6 @@ async def flash_emmc2(bmc_ip, directory, my_ip, dd_value, callback_progress, cal
 
     try:
         httpd = start_server(directory, port, callback_output)
-        if not httpd:
-            raise Exception("Local HTTP server failed to start. Check if port 80 is busy. Aborting eMMC flash.")
-            
         callback_progress(0.10)
 
         ser = serial.Serial(serial_device, 115200, timeout=0.1)
@@ -490,129 +538,84 @@ async def reset_to_uboot(callback_output, serial_device):
             callback_output("Serial connection remains open for console interaction.")
 
 
-async def bios_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, callback_output, is_bmc=False):
-    """
-    Handles BIOS or BMC firmware updates via Redfish.
-    is_bmc: Set to True if updating BMC firmware to handle the reboot/connection loss gracefully.
-    """
-    target_name = "BMC" if is_bmc else "BIOS"
-    callback_output(f"Initializing Redfish client for {target_name} update...")
-    
-    redfish_client = redfish.redfish_client(
-        base_url=f"https://{bmc_ip}", 
-        username=bmc_user, 
-        password=bmc_pass,
-        timeout=30
-    )
-    
+async def bios_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, callback_output):
+    callback_output("Initializing Red Fish client for BIOS update...")
+    redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
     callback_progress(0.10)
-    connection_lost = False
     
     try:
-        # 1. Login and Find Update Service
         await asyncio.to_thread(redfish_client.login)
         update_service = redfish_client.get("/redfish/v1/UpdateService")
-        
         if update_service.status != 200:
-            callback_output("Error: Could not locate Redfish Update Service.")
+            callback_output("Failed to find the update service.")
             return
+
+        callback_progress(0.15)
+        callback_output("Logged in.")
 
         update_service_url = update_service.dict["@odata.id"]
         
-        # 2. Verify File Format (Gzip check for .tar.gz)
-        if fw_content[:4] != b'\x1f\x8b\x08\x00':
-            callback_output(f"Note: Firmware file does not have standard gzip header. Proceeding anyway...")
-
-        # 3. Submit Update Request
+        # Verify we have a tar.gz file
+        if not fw_content[:4] == b'\x1f\x8b\x08\x00':  # Simple check for gzip magic number
+            callback_output("Verifying firmware format (tar.gz)...")
+        
+        # For BIOS updates, we need to specify the target as BIOS through proper headers
         headers = {"Content-Type": "application/octet-stream"}
-        callback_output(f"Uploading {target_name} firmware... do not interrupt.")
         
-        # Using the standard /update endpoint
-        response = await asyncio.to_thread(
-            redfish_client.post, 
-            f"{update_service_url}/update", 
-            body=fw_content, 
-            headers=headers
-        )
+        callback_output("Sending BIOS update request...")
+        callback_output("WARNING: BIOS update process can take up to 7 minutes. Please do not interrupt.")
+        response = await asyncio.to_thread(redfish_client.post, f"{update_service_url}/update", body=fw_content, headers=headers)
+        callback_progress(0.20)
 
-        if response.status not in [200, 202]:
-            callback_output(f"Failed to initiate update. BMC returned status: {response.status}")
-            return
-
-        # 4. Monitor Task
-        task_url = response.dict.get("@odata.id")
-        if not task_url:
-            callback_output("Update started, but BMC did not provide a Task URL. Monitoring skipped.")
-            callback_progress(1.0)
-            return
-
-        callback_output(f"Update accepted. Task ID: {task_url.split('/')[-1]}. Monitoring progress...")
-        
-        # BMC updates are usually faster but trigger a reboot; BIOS updates take longer (~7 mins)
-        max_attempts = 20 if is_bmc else 45 
-        attempt = 0
-        completed = False
-        
-        while attempt < max_attempts and not completed:
-            try:
-                task_response = await asyncio.to_thread(redfish_client.get, task_url)
-                task_data = task_response.dict
-                state = task_data.get("TaskState")
+        if response.status in [200, 202]:
+            callback_output(f"BIOS update initiated successfully: {response.text}")
+            task_url = response.dict["@odata.id"]
+            
+            # Custom monitoring for BIOS update with longer timeouts
+            max_attempts = 42  # 7 minutes with 10-second intervals
+            attempt = 0
+            completed = False
+            
+            while attempt < max_attempts and not completed:
+                try:
+                    task_status = await asyncio.to_thread(redfish_client.get, task_url)
+                    
+                    # Calculate progress (distribute from 20% to 95% across the expected duration)
+                    progress = 0.20 + (0.75 * (attempt / max_attempts))
+                    callback_progress(progress)
+                    
+                    if task_status.dict.get("TaskState") == "Completed":
+                        callback_output("BIOS update completed successfully!")
+                        callback_progress(1.0)
+                        completed = True
+                    elif task_status.dict.get("TaskState") == "Exception":
+                        callback_output(f"BIOS update failed: {task_status.dict.get('Messages', [{}])[0].get('Message', 'Unknown error')}")
+                        break
+                    else:
+                        # Show percentage based progress
+                        percentage = int((attempt / max_attempts) * 100)
+                        if attempt % 6 == 0:  # Show message every minute
+                            elapsed_minutes = attempt // 6
+                            callback_output(f"BIOS update in progress... ({percentage}% - {elapsed_minutes} minutes elapsed)")
+                except Exception as e:
+                    callback_output(f"Error checking task status: {e}")
                 
-                # Dynamic progress calculation (20% to 95%)
-                progress = 0.20 + (0.75 * (attempt / max_attempts))
-                callback_progress(progress)
-
-                if state == "Completed":
-                    callback_output(f"Flash complete: {target_name} update successful.")
-                    completed = True
-                    break
-                elif state in ["Exception", "Cancelled", "Killed"]:
-                    error_msg = task_data.get('Messages', [{}])[0].get('Message', 'Unknown error')
-                    callback_output(f"Update Error: {error_msg}")
-                    return
-
-                if attempt % 6 == 0 and attempt > 0:
-                    callback_output(f"Still processing... ({int(progress*100)}%)")
-
-            except Exception:
-                # If we are updating the BMC and lose connection, it's REBOOTING (Success!)
-                if is_bmc:
-                    callback_output("Connection lost—BMC is rebooting to apply firmware.")
-                    connection_lost = True
-                    completed = True
-                    break
-                else:
-                    # For BIOS, a connection loss might just be a network glitch
-                    callback_output("Connection blink... retrying status check.")
-
-            attempt += 1
-            await asyncio.sleep(10)
-
-        # 5. Finalize
-        if completed:
-            callback_progress(1.0)
-            if connection_lost:
-                callback_output("Update successful! Please wait 3-5 minutes for BMC to fully restart.")
-            else:
-                callback_output(f"{target_name} update finished successfully.")
+                attempt += 1
+                if not completed:
+                    await asyncio.sleep(10)  # 10-second intervals
+            
+            if not completed:
+                callback_output("BIOS update took longer than expected. Check system status manually.")
         else:
-            callback_output("Monitoring timed out. Please check BMC status manually in a few minutes.")
-
+            callback_output(f"Failed to initiate BIOS firmware update. Response code: {response.status}")
     except Exception as e:
-        callback_output(f"Critical script error: {str(e)}")
+        callback_output(f"Error: {e}")
     finally:
-        # Don't try to logout if the BMC is already offline/rebooting
-        if not connection_lost:
-            try:
-                await asyncio.to_thread(redfish_client.logout)
-            except:
-                pass
-
-    # Visual reset for the progress bar after a short delay
-    await asyncio.sleep(3)
-    callback_progress(0)
+        await asyncio.to_thread(redfish_client.logout)
     
+    await asyncio.sleep(5)
+    callback_progress(0)
+
 async def reset_to_uboot(callback_output, serial_device):
     """Resets the OpenBMC to U-Boot using the serial connection and emulates keyboard interaction."""
     ser = None

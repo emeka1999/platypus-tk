@@ -4,6 +4,12 @@ customtkinter
 # Hardware & Serial Communication
 pyserial
 
+# SOL console over SSH
+paramiko
+
+# Terminal emulation for the embedded console (BIOS/UEFI menus, vi, top, etc.)
+pyte
+
 # Redfish API interactions
 redfish
 urllib3

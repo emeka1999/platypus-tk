@@ -4,6 +4,80 @@ import serial
 import redfish
 import threading
 import weakref
+import shutil
+import subprocess
+
+
+# Ordered list of terminal emulators to try when opening a console window.
+# Newer Ubuntu releases don't ship terminator/xterm by default anymore, and
+# some (24.04+) are moving away from gnome-terminal toward ptyxis, so we
+# probe for whatever is actually installed rather than hardcoding one or two
+# options. Each entry describes how to pass a title and a command to run.
+#
+#   argv_builder(title, command_str) -> list[str]  suitable for subprocess.Popen
+TERMINAL_CANDIDATES = [
+    ("x-terminal-emulator", lambda title, cmd: ["x-terminal-emulator", "-T", title, "-e", cmd]),
+    ("gnome-terminal", lambda title, cmd: ["gnome-terminal", "--title", title, "--", "bash", "-c", cmd]),
+    ("ptyxis", lambda title, cmd: ["ptyxis", "--", "bash", "-c", cmd]),
+    ("konsole", lambda title, cmd: ["konsole", "--title", title, "-e", "bash", "-c", cmd]),
+    ("xfce4-terminal", lambda title, cmd: ["xfce4-terminal", "--title", title, "-e", cmd]),
+    ("mate-terminal", lambda title, cmd: ["mate-terminal", "--title", title, "-e", cmd]),
+    ("terminator", lambda title, cmd: ["terminator", "-T", title, "-e", cmd]),
+    ("xterm", lambda title, cmd: ["xterm", "-T", title, "-e", cmd]),
+]
+
+
+def find_available_terminal():
+    """Return the name of the first terminal emulator found on PATH, or None."""
+    for name, _builder in TERMINAL_CANDIDATES:
+        if shutil.which(name):
+            return name
+    return None
+
+
+def launch_in_terminal(command_str, title="Console", log=None):
+    """
+    Launch `command_str` inside whichever terminal emulator is available on
+    this system, trying candidates in order until one actually starts.
+
+    Args:
+        command_str: shell command to run inside the terminal (e.g. "minicom -D /dev/ttyUSB0")
+        title: window title to request (not all terminals honor this)
+        log: optional callable(str) used to report progress/errors
+
+    Returns:
+        subprocess.Popen of the launched terminal, or None if none could be started.
+    """
+    def _log(msg):
+        if log:
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    tried = []
+    for name, builder in TERMINAL_CANDIDATES:
+        if not shutil.which(name):
+            continue
+        tried.append(name)
+        try:
+            argv = builder(title, command_str)
+            process = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            _log(f"Opened console using '{name}' (PID: {process.pid})")
+            return process
+        except (FileNotFoundError, subprocess.SubprocessError) as e:
+            _log(f"Terminal '{name}' failed to launch: {e}")
+            continue
+
+    if tried:
+        _log(f"Tried terminal(s) {', '.join(tried)} but none launched successfully.")
+    else:
+        _log(
+            "No terminal emulator found on this system (checked: "
+            + ", ".join(n for n, _ in TERMINAL_CANDIDATES)
+            + "). Install one, e.g. 'sudo apt install xterm'."
+        )
+    return None
 
 
 # Global set to track serial connections - initialized properly
