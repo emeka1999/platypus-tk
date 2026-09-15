@@ -27,6 +27,7 @@ import queue
 import re
 import socket
 import threading
+import tkinter as tk
 
 import customtkinter as ctk
 import paramiko
@@ -40,11 +41,19 @@ import bmc
 # request) and the local pyte emulator. Keeping these identical is what
 # keeps cursor-addressed output aligned - if the remote thinks the terminal
 # is a different size than what we're actually rendering, positioning goes
-# wrong. Local serial (UART) BIOS/bootloader consoles don't negotiate a
-# size at all and commonly assume 80x24/80x25, so this grid is sized
-# comfortably larger than that to avoid clipping either way.
+# wrong.
+#
+# 100x31 is AMI Aptio's "Extended" console-redirection resolution - one of
+# the two standard options AMI's own BIOS setup offers (the other being
+# 80x24). This was previously set to the generic VT100 default of 80x25,
+# but that was too short for this specific BIOS: giving it fewer rows than
+# its own layout assumes pushed the top menu bar out of the visible area,
+# since AMI positions its fixed top bar/footer based on its own idea of
+# total screen height, not something it renegotiates with us. The wide,
+# sidebar-heavy layout seen in practice matches the 100-column Extended
+# mode much better than plain 80 columns too.
 SOL_TERM_COLUMNS = 100
-SOL_TERM_ROWS = 30
+SOL_TERM_ROWS = 31
 
 
 # Named-color palette pyte uses for the basic 16 ANSI colors (codes
@@ -61,6 +70,31 @@ _NAMED_COLORS = {
 }
 
 _HEX_DIGITS = set("0123456789abcdefABCDEF")
+
+# Represents SGR "bold" as a brighter color instead of an actual bold font
+# weight. A real bold font face is almost always measurably wider per
+# character than its regular weight even at the identical point size
+# (including Courier) - mixing the two within a monospace terminal grid
+# breaks strict column alignment, which is exactly what produces
+# misaligned/overlapping-looking text when a screen mixes bold headers
+# with regular text (e.g. BIOS menus). Real terminal emulators commonly
+# render bold as brightness for this same reason.
+_BOLD_BRIGHTEN = {
+    _NAMED_COLORS["black"]: _NAMED_COLORS["brightblack"],
+    _NAMED_COLORS["red"]: _NAMED_COLORS["brightred"],
+    _NAMED_COLORS["green"]: _NAMED_COLORS["brightgreen"],
+    _NAMED_COLORS["brown"]: _NAMED_COLORS["brightyellow"],
+    _NAMED_COLORS["blue"]: _NAMED_COLORS["brightblue"],
+    _NAMED_COLORS["magenta"]: _NAMED_COLORS["brightmagenta"],
+    _NAMED_COLORS["cyan"]: _NAMED_COLORS["brightcyan"],
+    _NAMED_COLORS["white"]: _NAMED_COLORS["brightwhite"],
+}
+
+
+def _bold_color(hex_color, default_fg):
+    if hex_color == default_fg:
+        return "#ffffff"
+    return _BOLD_BRIGHTEN.get(hex_color, hex_color)
 
 
 def _pyte_color_to_hex(value, default):
@@ -81,6 +115,26 @@ def _is_light(hex_color):
     return (0.299 * r + 0.587 * g + 0.114 * b) > 140
 
 
+class _ReplyScreen(pyte.Screen):
+    """
+    pyte.Screen already parses terminal query sequences correctly (Device
+    Attributes "ESC[c", Cursor Position Report "ESC[6n", etc.) and computes
+    the right reply - it just doesn't have any channel to actually send
+    that reply anywhere by default (write_process_input() is a no-op).
+    Some interactive full-screen programs query the terminal this way and
+    can hang or fall back to a degraded rendering mode without a reply, so
+    this routes it back out to whatever backend is currently connected.
+    """
+
+    def __init__(self, *args, on_reply=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._on_reply = on_reply
+
+    def write_process_input(self, data):
+        if self._on_reply:
+            self._on_reply(data)
+
+
 class TerminalView:
     """
     Renders a fixed-size VT100 terminal (via pyte) into a CTkTextbox.
@@ -96,12 +150,15 @@ class TerminalView:
     """
 
     DEFAULT_FG = "#e5e5e5"
+    FONT_SIZE = 15
 
-    def __init__(self, textbox, columns=SOL_TERM_COLUMNS, rows=SOL_TERM_ROWS, widget_bg="#1e1e1e"):
+    def __init__(self, textbox, columns=SOL_TERM_COLUMNS, rows=SOL_TERM_ROWS,
+                 widget_bg="#1e1e1e", on_reply=None):
         self.textbox = textbox
-        # CTkTextbox.tag_config() rejects a 'font' option (DPI-scaling
-        # concern), so bold tags are configured on the real underlying
-        # tkinter.Text widget instead, bypassing that restriction.
+        # Tags, cursor add/remove, and line indexing all need to operate on
+        # the real underlying tkinter.Text widget, not the CTkTextbox
+        # wrapper (CTkTextbox.insert() forwards here too, so addressing is
+        # consistent either way).
         self._raw_textbox = getattr(textbox, "_textbox", textbox)
         self.columns = columns
         self.rows = rows
@@ -110,10 +167,16 @@ class TerminalView:
         # genuinely invisible text (see _tag_for). Kept in sync via set_bg()
         # whenever the panel switches modes/background color.
         self.widget_bg = widget_bg
-        self.screen = pyte.Screen(columns, rows)
+        self.screen = _ReplyScreen(columns, rows, on_reply=on_reply)
         self.stream = pyte.Stream(self.screen)
         self._known_tags = set()
+        # A solid block, always readable regardless of the surrounding
+        # color scheme (dark Serial background or blue "BIOS" SOL
+        # background) - a classic reverse-video terminal cursor look.
+        self._raw_textbox.tag_configure("cursor", foreground="#000000", background="#ffffff")
+        self._last_cursor_index = None
         self._redraw(force=True)
+        self._update_cursor()
 
     def set_bg(self, color):
         """Update the known widget background and force a full redraw, so
@@ -128,11 +191,40 @@ class TerminalView:
         next session."""
         self.screen.reset()
         self._raw_textbox.delete("1.0", "end")
+        self._last_cursor_index = None
         self._redraw(force=True)
 
     def feed(self, data: str):
         self.stream.feed(data)
         self._redraw()
+        # Cursor position can change (arrow keys, Home/End, etc.) without
+        # any character content changing, so pyte won't mark a row dirty
+        # for that - the cursor has to be tracked independently of the
+        # dirty-row content redraw, every feed, not just when something
+        # was actually drawn.
+        self._update_cursor()
+
+    def _update_cursor(self):
+        if self._last_cursor_index is not None:
+            old_row, old_col = self._last_cursor_index
+            try:
+                self._raw_textbox.tag_remove("cursor", f"{old_row + 1}.{old_col}", f"{old_row + 1}.{old_col + 1}")
+            except Exception:
+                pass
+            self._last_cursor_index = None
+
+        cursor = self.screen.cursor
+        if cursor.hidden:
+            return  # Many BIOS/UEFI menus hide the blinking cursor and draw
+                     # their own row highlight instead - respect that.
+        row, col = cursor.y, cursor.x
+        if 0 <= row < self.rows and 0 <= col < self.columns:
+            try:
+                self._raw_textbox.tag_add("cursor", f"{row + 1}.{col}", f"{row + 1}.{col + 1}")
+                self._raw_textbox.tag_raise("cursor")
+                self._last_cursor_index = (row, col)
+            except Exception:
+                pass
 
     def _tag_for(self, char):
         fg = _pyte_color_to_hex(char.fg, self.DEFAULT_FG)
@@ -140,23 +232,30 @@ class TerminalView:
         if char.reverse:
             fg, bg = (bg or "#000000"), (fg)
 
+        if char.bold:
+            fg = _bold_color(fg, self.DEFAULT_FG)
+
         # Minimum-contrast safeguard: some remote consoles produce a
         # degenerate same-color state for a "highlighted" cell (e.g. only
         # changing the background and leaving foreground as whatever it
         # already was), which would otherwise render completely invisible
         # text instead of a visible highlight. Nudge the foreground to
         # guarantee it's never literally the same color as what it sits on.
+        # Checked last so it also catches a collision introduced by the
+        # bold-brighten step above.
         effective_bg = bg if bg is not None else self.widget_bg
         if fg.lower() == effective_bg.lower():
             fg = "#000000" if _is_light(effective_bg) else "#ffffff"
 
-        name = f"pt_{fg}_{bg}_{int(char.bold)}_{int(char.underscore)}"
+        # Font is never varied per-character (no bold font weight, ever) -
+        # every character uses the exact same font at the exact same size,
+        # set once on the widget itself. This is what keeps the monospace
+        # column grid strictly aligned; see _BOLD_BRIGHTEN above for why.
+        name = f"pt_{fg}_{bg}_{int(char.underscore)}"
         if name not in self._known_tags:
             opts = {"foreground": fg}
             if bg:
                 opts["background"] = bg
-            if char.bold:
-                opts["font"] = ("Courier", 11, "bold")
             if char.underscore:
                 opts["underline"] = True
             self._raw_textbox.tag_configure(name, **opts)
@@ -197,7 +296,14 @@ class TerminalView:
                 self._raw_textbox.insert(f"{line_no}.end", run_text, run_tag)
 
         self.screen.dirty.clear()
-        self.textbox.see("end")
+        # Pin the view to the top, not the bottom: this is a fixed N-row
+        # terminal grid, not a growing scrollback log, so there's no "end"
+        # to scroll toward in the first place. Calling see("end") here (as
+        # if this were a log) scrolled the viewport to the last row of the
+        # fixed grid on every redraw, which - if the panel isn't tall
+        # enough at the current font size to show all rows at once - cut
+        # the top of the screen out of view instead of the bottom.
+        self.textbox.see("1.0")
 
 
 class SerialBackend:
@@ -330,8 +436,14 @@ class SolBackend:
                 # Fixed terminal size so the remote's output matches what
                 # the console panel actually displays (no unexpected
                 # wrapping/reflow from a mismatched column count).
+                #
+                # "xterm-256color", not "vt100": our renderer already fully
+                # supports 256-color, truecolor, bold, and underline (see
+                # TerminalView) - claiming plain vt100 tells the remote
+                # shell/ncurses apps to degrade to monochrome, throwing away
+                # capability we actually have.
                 self._channel = self._client.invoke_shell(
-                    term="vt100",
+                    term="xterm-256color",
                     width=SOL_TERM_COLUMNS,
                     height=SOL_TERM_ROWS,
                 )
@@ -443,7 +555,10 @@ class EmbeddedConsole(ctk.CTkFrame):
         self._queue = queue.Queue()
 
         self._build_ui()
-        self._term = TerminalView(self.output, widget_bg=self._BG_FOR_MODE[self.mode])
+        self._term = TerminalView(
+            self.output, widget_bg=self._BG_FOR_MODE[self.mode],
+            on_reply=self._write_to_backend,
+        )
         self._poll_queue()
 
     def _build_ui(self):
@@ -500,11 +615,26 @@ class EmbeddedConsole(ctk.CTkFrame):
         )
         self.reboot_btn.pack(side="left", padx=2)
 
+        # Container so the output textbox and its horizontal scrollbar
+        # stack correctly; wrap="none" is intentional and important - a
+        # fixed 100-column terminal grid must never be word-wrapped by the
+        # widget itself (that would scramble the alignment the remote
+        # already computed for that exact column count), so instead it
+        # scrolls horizontally when the panel isn't wide enough to show
+        # every column at once.
+        output_container = ctk.CTkFrame(self, fg_color="transparent")
+        output_container.pack(fill="both", expand=True, padx=4, pady=(2, 0))
+
         self.output = ctk.CTkTextbox(
-            self, wrap="word", font=("Courier", 11),
+            output_container, wrap="none", font=("Courier", TerminalView.FONT_SIZE),
             fg_color=self._BG_FOR_MODE[self.mode], text_color="#e5e5e5",
         )
-        self.output.pack(fill="both", expand=True, padx=4, pady=(2, 0))
+        self.output.pack(fill="both", expand=True)
+
+        raw_output = getattr(self.output, "_textbox", self.output)
+        h_scroll = tk.Scrollbar(output_container, orient="horizontal", command=raw_output.xview)
+        h_scroll.pack(fill="x")
+        raw_output.configure(xscrollcommand=h_scroll.set)
 
         # Keyboard is captured directly on the output pane once connected -
         # click into it and just type, like a real terminal. No separate
@@ -660,6 +790,14 @@ class EmbeddedConsole(ctk.CTkFrame):
             self.backend = None
             self._status("Disconnected", "gray")
         self._set_redfish_controls_enabled(False)
+
+    def _write_to_backend(self, data):
+        """Stable target for TerminalView's terminal-query replies (Device
+        Attributes, Cursor Position Report, etc.) - always dispatches to
+        whichever backend is currently connected, so TerminalView doesn't
+        need updating every time the backend object itself changes."""
+        if self.backend:
+            self.backend.write(data)
 
     def _set_redfish_controls_enabled(self, enabled: bool):
         state = "normal" if enabled else "disabled"

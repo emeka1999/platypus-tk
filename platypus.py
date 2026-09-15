@@ -6,6 +6,7 @@ import serial
 from utils import *
 from network import *
 from embedded_console import EmbeddedConsole
+from inventory_panel import InventoryPanel
 from functools import partial
 from threading import Thread
 import tempfile
@@ -1067,8 +1068,21 @@ class PlatypusApp:
                     "    xhost +si:localuser:root\n"
                 )
             raise
-        self.root.title("Platypus BMC Management - 6.1.2")
-        self.root.geometry("1600x850")
+        self.root.title("Platypus BMC Management - 6.2.0")
+        self.root.geometry("1600x850")  # fallback size if maximizing fails below
+
+        # Open maximized rather than at the fixed size above. 'zoomed' is
+        # the normal cross-platform way (Windows, most Linux window
+        # managers); '-zoomed' is the X11-specific fallback some window
+        # managers require instead. If both fail for some reason, fall
+        # back to manually sizing the window to the full screen.
+        try:
+            self.root.state("zoomed")
+        except Exception:
+            try:
+                self.root.attributes("-zoomed", True)
+            except Exception:
+                self.root.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
         
         # Initialize variables
         self._init_variables()
@@ -1097,13 +1111,15 @@ class PlatypusApp:
         self.main_container.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Split into a left column (all existing controls) and a right
-        # column holding the embedded Serial/SOL console panel.
-        self.main_container.grid_rowconfigure(0, weight=1)
+        # column holding the embedded Serial/SOL console panel on top and
+        # a system inventory panel (BIOS/BMC version, NICs, drives) below.
+        self.main_container.grid_rowconfigure(0, weight=5)
+        self.main_container.grid_rowconfigure(1, weight=1, minsize=200)
         self.main_container.grid_columnconfigure(0, weight=1)
         self.main_container.grid_columnconfigure(1, weight=1, minsize=480)
 
         self.controls_frame = ctk.CTkFrame(self.main_container)
-        self.controls_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        self.controls_frame.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 5))
 
         self.console_panel = EmbeddedConsole(
             self.main_container,
@@ -1114,6 +1130,15 @@ class PlatypusApp:
             log=self.log_message,
         )
         self.console_panel.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+
+        self.inventory_panel = InventoryPanel(
+            self.main_container,
+            get_bmc_ip=self.bmc_ip.get,
+            get_username=self.username.get,
+            get_password=self.password.get,
+            log=self.log_message,
+        )
+        self.inventory_panel.grid(row=1, column=1, sticky="nsew", padx=(5, 0), pady=(5, 0))
         
         # Create UI sections in the controls frame
         self.create_connection_section()

@@ -75,6 +75,130 @@ def reboot_host(bmc_user, bmc_pass, bmc_ip):
     return _system_reset(bmc_user, bmc_pass, bmc_ip, "ForceRestart", "Reboot command sent.")
 
 
+# --- System inventory (BIOS/BMC versions, NICs, drives) via Redfish ---
+
+def _get_json(redfish_client, uri):
+    """GET a Redfish resource and return its JSON dict, or None if the
+    request failed - inventory gathering should degrade gracefully (show
+    what's available) rather than fail entirely because one sub-resource
+    a particular BMC doesn't implement returned an error."""
+    try:
+        resp = redfish_client.get(uri)
+        if resp.status == 200:
+            return resp.dict
+    except Exception:
+        pass
+    return None
+
+
+def _bytes_to_gb(num_bytes):
+    if not isinstance(num_bytes, (int, float)):
+        return None
+    return round(num_bytes / (1000 ** 3), 1)
+
+
+def get_system_inventory(bmc_user, bmc_pass, bmc_ip):
+    """
+    Gather a snapshot of host/BMC identity, firmware versions, network
+    interfaces, and storage drives via Redfish. Blocking/synchronous - call
+    from a background thread. Returns a dict:
+
+        {
+            "manufacturer": str, "model": str, "serial_number": str,
+            "part_number": str, "bios_version": str, "bmc_version": str,
+            "bmc_model": str, "cpu": str, "memory_gb": float,
+            "nics": [ {"name","mac","link_status","speed_mbps","ipv4"} ],
+            "drives": [ {"name","model","capacity_gb","media_type",
+                         "protocol","health"} ],
+        }
+
+    Any field that couldn't be read (BMC doesn't implement that resource,
+    a sub-request failed, etc.) is left as None/empty rather than raising,
+    so a partial inventory is still useful.
+    """
+    redfish_client = redfish.redfish_client(base_url=f"https://{bmc_ip}", username=bmc_user, password=bmc_pass)
+    redfish_client.login()
+    try:
+        info = {
+            "manufacturer": None, "model": None, "serial_number": None,
+            "part_number": None, "bios_version": None, "bmc_version": None,
+            "bmc_model": None, "cpu": None, "memory_gb": None,
+            "nics": [], "drives": [],
+        }
+
+        system_uri = _discover_system_endpoint(redfish_client)
+        system = _get_json(redfish_client, system_uri) or {}
+
+        info["manufacturer"] = system.get("Manufacturer")
+        info["model"] = system.get("Model")
+        info["serial_number"] = system.get("SerialNumber")
+        info["part_number"] = system.get("PartNumber")
+        info["bios_version"] = system.get("BiosVersion")
+
+        proc_summary = system.get("ProcessorSummary", {}) or {}
+        cpu_model = proc_summary.get("Model")
+        cpu_count = proc_summary.get("Count")
+        if cpu_model:
+            info["cpu"] = f"{cpu_count}x {cpu_model}" if cpu_count else cpu_model
+
+        mem_summary = system.get("MemorySummary", {}) or {}
+        info["memory_gb"] = mem_summary.get("TotalSystemMemoryGiB")
+
+        # BMC firmware version/model
+        managers = _get_json(redfish_client, "/redfish/v1/Managers") or {}
+        manager_members = managers.get("Members", [])
+        if manager_members:
+            manager = _get_json(redfish_client, manager_members[0]["@odata.id"]) or {}
+            info["bmc_version"] = manager.get("FirmwareVersion")
+            info["bmc_model"] = manager.get("Model")
+
+        # NICs
+        eth_uri = (system.get("EthernetInterfaces") or {}).get("@odata.id")
+        if not eth_uri:
+            eth_uri = f"{system_uri}/EthernetInterfaces"
+        eth_collection = _get_json(redfish_client, eth_uri) or {}
+        for member in eth_collection.get("Members", []):
+            nic = _get_json(redfish_client, member["@odata.id"])
+            if not nic:
+                continue
+            ipv4_list = nic.get("IPv4Addresses") or []
+            ipv4 = ipv4_list[0].get("Address") if ipv4_list else None
+            info["nics"].append({
+                "name": nic.get("Id") or nic.get("Name"),
+                "mac": nic.get("MACAddress"),
+                "link_status": nic.get("LinkStatus"),
+                "speed_mbps": nic.get("SpeedMbps"),
+                "ipv4": ipv4,
+            })
+
+        # Drives (via each Storage controller's Drives collection)
+        storage_uri = (system.get("Storage") or {}).get("@odata.id")
+        if not storage_uri:
+            storage_uri = f"{system_uri}/Storage"
+        storage_collection = _get_json(redfish_client, storage_uri) or {}
+        for storage_member in storage_collection.get("Members", []):
+            controller = _get_json(redfish_client, storage_member["@odata.id"])
+            if not controller:
+                continue
+            for drive_link in controller.get("Drives", []):
+                drive = _get_json(redfish_client, drive_link["@odata.id"])
+                if not drive:
+                    continue
+                status = drive.get("Status", {}) or {}
+                info["drives"].append({
+                    "name": drive.get("Name") or drive.get("Id"),
+                    "model": drive.get("Model"),
+                    "capacity_gb": _bytes_to_gb(drive.get("CapacityBytes")),
+                    "media_type": drive.get("MediaType"),
+                    "protocol": drive.get("Protocol"),
+                    "health": status.get("Health"),
+                })
+
+        return info
+    finally:
+        redfish_client.logout()
+
+
 # Updates the BMC firmware through redfish 
 async def bmc_update(bmc_user, bmc_pass, bmc_ip, fw_content, callback_progress, callback_output):
     callback_output("Initializing Red Fish client...")
