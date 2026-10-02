@@ -20,7 +20,7 @@ from tkinter import messagebox
 import serial
 import psutil
 
-from utils import cleanup_all_serial_connections, read_serial_data
+from utils import cleanup_all_serial_connections, read_serial_data, launch_in_terminal
 from network import *
 from bmc import *
 
@@ -273,7 +273,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
     def select_firmware_folder(self):
         """Select firmware folder"""
-        from main import FileSelectionHelper
+        from platypus import FileSelectionHelper
         folder = FileSelectionHelper.select_directory(self, "Select Firmware Folder", 
                                                      self.firmware_folder.get() or os.path.expanduser("~"))
         if folder:
@@ -282,7 +282,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
     def select_fip_file(self):
         """Select FIP file with validation"""
-        from main import FileSelectionHelper
+        from platypus import FileSelectionHelper
         file_path = FileSelectionHelper.select_file(self, "Select FIP File", 
                                                    os.path.dirname(self.fip_file.get()) or os.path.expanduser("~"),
                                                    "FIP files (fip-snuc-nanobmc.bin) | fip-snuc-nanobmc.bin")
@@ -295,7 +295,7 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
 
     def select_eeprom_file(self):
         """Select EEPROM file with validation"""
-        from main import FileSelectionHelper
+        from platypus import FileSelectionHelper
         file_path = FileSelectionHelper.select_file(self, "Select EEPROM File", 
                                                    os.path.dirname(self.eeprom_file.get()) or os.path.expanduser("~"),
                                                    "FRU files (fru.bin) | fru.bin")
@@ -1160,33 +1160,19 @@ class MultiUnitFlashWindow(ctk.CTkToplevel):
             device = unit['device_var'].get()
             unit_id = unit['id']
             bmc_ip = unit['bmc_ip_var'].get() or "No IP"
-            
+
             try:
-                terminal_commands = [
-                    ["x-terminal-emulator", "-T", f"Unit {unit_id} - {device} - {bmc_ip}", 
-                     "-e", f"minicom -D {device}"],
-                    ["gnome-terminal", "--title", f"Unit {unit_id} - {device} - {bmc_ip}", 
-                     "--", "minicom", "-D", device],
-                    ["xterm", "-T", f"Unit {unit_id} - {device} - {bmc_ip}", 
-                     "-e", f"minicom -D {device}"],
-                    ["konsole", "--title", f"Unit {unit_id} - {device} - {bmc_ip}", 
-                     "-e", f"minicom -D {device}"]
-                ]
-                
-                process_started = False
-                for cmd in terminal_commands:
-                    try:
-                        process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        self.console_processes.append(process)
-                        self.log(f"Console opened for Unit {unit_id} on {device} (PID: {process.pid})")
-                        process_started = True
-                        break
-                    except (FileNotFoundError, subprocess.SubprocessError):
-                        continue
-                
-                if not process_started:
+                process = launch_in_terminal(
+                    f"minicom -D {device}",
+                    title=f"Unit {unit_id} - {device} - {bmc_ip}",
+                    log=self.log,
+                )
+                if process is not None:
+                    self.console_processes.append(process)
+                    self.log(f"Console opened for Unit {unit_id} on {device} (PID: {process.pid})")
+                else:
                     self.log(f"Failed to open console for Unit {unit_id} - no suitable terminal found")
-                    
+
             except Exception as e:
                 self.log(f"Failed to open console for Unit {unit_id}: {e}")
 

@@ -1,0 +1,25 @@
+# GUI Framework
+customtkinter
+
+# Hardware & Serial Communication
+pyserial
+
+# SOL console over SSH
+paramiko
+
+# Terminal emulation for the embedded console (BIOS/UEFI menus, vi, top, etc.)
+pyte
+
+# Redfish API interactions
+redfish
+urllib3
+
+# Byte-range support when hosting a local ISO for Virtual Media (optional -
+# falls back to plain http.server without it)
+RangeHTTPServer
+
+# System and Process Management
+psutil
+
+# Network Interface Detection (Optional but highly recommended)
+netifaces

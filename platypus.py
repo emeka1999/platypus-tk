@@ -1,10 +1,35 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import messagebox
-import asyncio, glob, bmc, json, os, time, psutil, threading, subprocess
+
+# Work around a real bug in some installed CustomTkinter versions:
+# CTkScrollbar._on_motion() reads self._motion_center_offset, but
+# __init__() never initializes it - only the click handlers
+# (_clicked/_clicked_scrollbar) ever set it. If a drag/motion event
+# reaches the scrollbar before one of those handlers has fired first
+# (easy to trigger depending on exactly where the initial click lands),
+# it raises AttributeError and crashes the app. This affects every
+# CTkScrollableFrame in the app (Inventory, Sensors, etc.), since they
+# each create their own CTkScrollbar internally - patched here, once, at
+# import time, rather than requiring everyone to pin a fixed CTk version.
+if not hasattr(ctk.CTkScrollbar, "_platypus_motion_offset_patch"):
+    _original_ctk_scrollbar_init = ctk.CTkScrollbar.__init__
+
+    def _patched_ctk_scrollbar_init(self, *args, **kwargs):
+        _original_ctk_scrollbar_init(self, *args, **kwargs)
+        self._motion_center_offset = 0
+
+    ctk.CTkScrollbar.__init__ = _patched_ctk_scrollbar_init
+    ctk.CTkScrollbar._platypus_motion_offset_patch = True
+
+import asyncio, glob, bmc, json, os, time, psutil, threading, subprocess, shutil, webbrowser
 import serial
 from utils import *
 from network import *
+from embedded_console import EmbeddedConsole
+from inventory_panel import InventoryPanel
+from virtual_media_panel import VirtualMediaPanel
+from sensors_panel import SensorsPanel
 from functools import partial
 from threading import Thread
 import tempfile
@@ -17,6 +42,103 @@ import threading
 import glob
 from tkinter import messagebox
 from tkinter import filedialog
+import pwd
+
+def _find_x_auth_file():
+    """Scan running X/XWayland processes for an explicit '-auth <file>'
+    argument. Different desktop environments put this file in different
+    places -- GNOME/mutter uses a randomly-named file under
+    XDG_RUNTIME_DIR, KDE varies, some setups still use ~/.Xauthority --
+    so reading it straight from the running server's own command line
+    works regardless of which convention is in play, instead of guessing
+    a single hardcoded path.
+    """
+    try:
+        for proc in psutil.process_iter(['name', 'cmdline']):
+            name = (proc.info.get('name') or '').lower()
+            if name not in ('xwayland', 'xorg', 'x'):
+                continue
+            cmdline = proc.info.get('cmdline') or []
+            for i, arg in enumerate(cmdline):
+                if arg == '-auth' and i + 1 < len(cmdline):
+                    candidate = cmdline[i + 1]
+                    if os.path.isfile(candidate):
+                        return candidate
+    except Exception:
+        pass
+    return None
+
+
+def _grant_root_x_access(sudo_user, display):
+    """Best-effort: ask the owning user's own session to explicitly allow
+    root to connect, via xhost. This is what actually fixes things on
+    compositors that run XWayland with no -auth file at all -- niri (via
+    xwayland-satellite), sway, and other wlroots-based setups -- where
+    access is otherwise restricted purely by UID and there's no cookie
+    file to point XAUTHORITY at in the first place. xhost has to be run
+    as the already-authorized user, not as root, so this shells out via
+    'sudo -u' back to the original user.
+    """
+    try:
+        result = subprocess.run(
+            ['sudo', '-u', sudo_user, 'env', f'DISPLAY={display}',
+             'xhost', '+si:localuser:root'],
+            capture_output=True, text=True, timeout=5
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
+def _ensure_x11_access_for_root():
+    """Make the GUI able to open when this app is run as root via sudo,
+    regardless of desktop environment or compositor. Tk itself is an
+    X11-only toolkit -- under Wayland it can only work through XWayland --
+    and root has no automatic permission to connect to another user's
+    display. Three approaches are layered since no single one covers
+    every setup:
+
+      1. Point XAUTHORITY at the invoking user's own ~/.Xauthority, if it
+         exists (classic X11, and some XWayland setups).
+      2. If that file doesn't exist, look at the actual running
+         X/XWayland process for an explicit -auth <file> argument and use
+         that instead (covers GNOME/mutter, KDE/kwin, and similar where
+         the cookie file lives somewhere other than ~/.Xauthority).
+      3. Regardless of whether either of the above found anything, also
+         try 'xhost +si:localuser:root' as the invoking user -- this is
+         the one that actually works on compositors that run XWayland
+         with no auth file at all (niri, sway, other wlroots-based
+         setups).
+
+    Every step is best-effort and silently continues on failure. If
+    nothing here works, CTk() will still raise TclError, and __init__
+    catches that with an actionable message instead of a raw traceback.
+    """
+    if os.geteuid() != 0 or 'SUDO_USER' not in os.environ:
+        return
+
+    sudo_user = os.environ['SUDO_USER']
+    display = os.environ.get('DISPLAY', ':0')
+
+    if not os.environ.get('XAUTHORITY'):
+        try:
+            user_home = pwd.getpwnam(sudo_user).pw_dir
+            candidate = os.path.join(user_home, '.Xauthority')
+            if os.path.isfile(candidate):
+                os.environ['XAUTHORITY'] = candidate
+            else:
+                found = _find_x_auth_file()
+                if found:
+                    os.environ['XAUTHORITY'] = found
+        except KeyError:
+            pass
+
+    _grant_root_x_access(sudo_user, display)
+
+
+_ensure_x11_access_for_root()
 
 try:
     from extra import create_multi_unit_window
@@ -669,7 +791,7 @@ class FlashAllWindow(ctk.CTkToplevel):
         self.parent = parent
         self.app_instance = app_instance  # Store the app instance
         self.title("Select Files for Flashing")
-        self.geometry("500x450") # Increased height for checkbox
+        self.geometry("650x560")
         
         # Set parent relationship but DON'T make it modal
         self.transient(parent)
@@ -679,6 +801,8 @@ class FlashAllWindow(ctk.CTkToplevel):
         self.fip_file = ctk.StringVar()
         self.eeprom_file = ctk.StringVar()
         self.flash_fru_var = ctk.BooleanVar() # For the checkbox
+        self.auto_password_compliance_var = ctk.BooleanVar(value=False)
+        self.compliance_default_password_var = ctk.StringVar(value="0penBmc123")
         
         # Load previously selected files from config
         self.load_previous_selections()
@@ -777,7 +901,44 @@ class FlashAllWindow(ctk.CTkToplevel):
             # Set initial state from loaded config
             # (self.flash_fru_var was set in load_previous_selections)
             toggle_eeprom_widgets() # Show/hide based on loaded value
-        
+
+            # Auto Set Password Compliance - only meaningful (and only
+            # shown) when FRU flash is checked: after the reboot, waits
+            # 75s, runs the auto-set-password sequence, then 2.5s later
+            # sets the IP, then 2.5s later flashes the EEPROM - all
+            # handled by bmc.flash_emmc_fru_checked. If unchecked, Flash
+            # All falls back to the manual "click Continue after you've
+            # logged in yourself" popup.
+            self.compliance_frame = ctk.CTkFrame(self, fg_color="transparent")
+
+            ctk.CTkCheckBox(
+                self.compliance_frame, text="Auto Set Password Compliance",
+                variable=self.auto_password_compliance_var,
+            ).pack(anchor="w", padx=5, pady=(5, 0))
+
+            pw_row = ctk.CTkFrame(self.compliance_frame, fg_color="transparent")
+            pw_row.pack(fill="x", padx=5, pady=(4, 0))
+            ctk.CTkLabel(pw_row, text="Default password:").pack(side="left")
+            ctk.CTkEntry(pw_row, textvariable=self.compliance_default_password_var, width=180).pack(side="left", padx=(6, 0))
+
+            def toggle_compliance_frame():
+                if self.flash_fru_var.get():
+                    self.compliance_frame.pack(fill="x", padx=10, pady=(4, 0))
+                else:
+                    self.compliance_frame.pack_forget()
+
+            def toggle_all():
+                toggle_eeprom_widgets()
+                toggle_compliance_frame()
+
+            # Re-wire the FRU checkbox (already packed above) to also
+            # toggle the compliance frame's visibility
+            for child in self.winfo_children():
+                if isinstance(child, ctk.CTkCheckBox) and child.cget("text") == "Flash FRU (EEPROM)?":
+                    child.configure(command=toggle_all)
+                    break
+            toggle_compliance_frame()
+
         ctk.CTkButton(self, text="Start Flashing", command=self.start_flashing).pack(pady=20)
     
     def select_firmware_folder(self):
@@ -843,8 +1004,7 @@ class FlashAllWindow(ctk.CTkToplevel):
             if hasattr(app, 'save_config'):
                 app.save_config()
             
-            self.log_message(f"✓ Valid FIP file selected: {filename}")
-
+            
     def select_eeprom_file(self):
         """Select EEPROM file for flashing FRU with validation"""
         # Start with last selected EEPROM file directory or fall back to general EEPROM dir
@@ -925,14 +1085,20 @@ class FlashAllWindow(ctk.CTkToplevel):
         
         # Save the selections before starting the thread
         self.save_selections_to_config()
+
+        do_auto_password_compliance = self.auto_password_compliance_var.get() and do_flash_fru
+        default_password = self.compliance_default_password_var.get()
         
-        # Pass do_flash_fru to the sequence
-        threading.Thread(target=self.run_flash_sequence, args=(do_flash_fru,), daemon=True).start()
+        # Pass do_flash_fru and compliance settings to the sequence
+        threading.Thread(
+            target=self.run_flash_sequence,
+            args=(do_flash_fru, do_auto_password_compliance, default_password),
+            daemon=True,
+        ).start()
         self.destroy()  # Close the window when starting the flashing
     
-    def run_flash_sequence(self, do_flash_fru):
+    def run_flash_sequence(self, do_flash_fru, do_auto_password_compliance, default_password):
         """Execute the full flashing sequence by calling the main app's method"""
-        # Get required parameters
         firmware_folder = self.firmware_folder.get()
         fip_file = self.fip_file.get()
         eeprom_file = self.eeprom_file.get() if hasattr(self, 'eeprom_file') else None
@@ -944,11 +1110,24 @@ class FlashAllWindow(ctk.CTkToplevel):
             fip_file,
             eeprom_file,
             bmc_type,
-            do_flash_fru  # Pass the boolean flag
+            do_flash_fru,
+            do_auto_password_compliance,
+            default_password,
         )
      
 
 class PlatypusApp:
+
+    # Button theme presets. "Default" restores CTk's own built-in blue
+    # (captured from the actual theme at startup - see _collect_themable_
+    # buttons - rather than hardcoded here, so it always matches whatever
+    # CTk's "blue" theme actually resolves to). SNUC Yellow/Blue use the
+    # exact brand hex values from SNUC's own asset files (YILLO = #FEDD00,
+    # --color-blue = #0075FB).
+    BUTTON_THEMES = {
+        "SNUC Yellow": {"fg_color": "#FEDD00", "hover_color": "#E0C300", "text_color": "#101820"},
+        "SNUC Blue": {"fg_color": "#0075FB", "hover_color": "#005FD1", "text_color": "#FFFFFF"},
+    }
 
     def __init__(self):
         """Initialize the application with auto-opening console"""
@@ -957,9 +1136,35 @@ class PlatypusApp:
         ctk.set_default_color_theme("blue")
 
         # Create main window with specific class name
-        self.root = ctk.CTk(className="PlatypusApp")  # Set class name during creation
-        self.root.title("Platypus BMC Management - 6.1.2")
-        self.root.geometry("800x850")  # Adjusted to fit 1080p
+        try:
+            self.root = ctk.CTk(className="PlatypusApp")  # Set class name during creation
+        except tk.TclError as e:
+            if os.geteuid() == 0 and 'SUDO_USER' in os.environ:
+                print(
+                    "\nCould not open a display while running as root "
+                    f"(underlying error: {e}).\n"
+                    "Automatic fixes were attempted (XAUTHORITY detection, "
+                    "xhost) but didn't resolve it on this system.\n"
+                    "As a manual workaround, run this once as your normal "
+                    f"user ({os.environ['SUDO_USER']}) before using sudo:\n"
+                    "    xhost +si:localuser:root\n"
+                )
+            raise
+        self.root.title("Platypus BMC Management - 7.0")
+        self.root.geometry("1600x850")  # fallback size if maximizing fails below
+
+        # Open maximized rather than at the fixed size above. 'zoomed' is
+        # the normal cross-platform way (Windows, most Linux window
+        # managers); '-zoomed' is the X11-specific fallback some window
+        # managers require instead. If both fail for some reason, fall
+        # back to manually sizing the window to the full screen.
+        try:
+            self.root.state("zoomed")
+        except Exception:
+            try:
+                self.root.attributes("-zoomed", True)
+            except Exception:
+                self.root.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
         
         # Initialize variables
         self._init_variables()
@@ -986,12 +1191,48 @@ class PlatypusApp:
         # Create main container frame for the UI
         self.main_container = ctk.CTkFrame(self.root)
         self.main_container.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Use main_container as controls_frame (no split layout anymore)
-        self.controls_frame = self.main_container
+
+        # Split into a left column (all existing controls) and a right
+        # column holding the embedded Serial/SOL console panel on top and
+        # a system inventory panel (BIOS/BMC version, NICs, drives) below.
+        self.main_container.grid_rowconfigure(0, weight=5)
+        self.main_container.grid_rowconfigure(1, weight=1, minsize=200)
+        self.main_container.grid_columnconfigure(0, weight=1)
+        self.main_container.grid_columnconfigure(1, weight=1, minsize=480)
+
+        # Actually wire up the resize handler - it was defined but never
+        # bound to anything, so the minimum-size enforcement and the
+        # console/controls split never actually adapted as the window was
+        # resized this whole time.
+        self._resize_debounce_job = None
+        self.root.bind("<Configure>", self.on_window_resize)
+
+        self.controls_frame = ctk.CTkFrame(self.main_container)
+        self.controls_frame.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 5))
+
+        self.console_panel = EmbeddedConsole(
+            self.main_container,
+            get_serial_device=self.serial_device.get,
+            get_bmc_ip=self.bmc_ip.get,
+            get_password=self.password.get,
+            get_username=self.username.get,
+            log=self.log_message,
+        )
+        self.console_panel.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+
+        self.inventory_panel = InventoryPanel(
+            self.main_container,
+            get_bmc_ip=self.bmc_ip.get,
+            get_username=self.username.get,
+            get_password=self.password.get,
+            log=self.log_message,
+            bmc_ip_var=self.bmc_ip,
+            on_ready=lambda ready: self.console_panel.set_external_redfish_ready("inventory", ready),
+        )
+        self.inventory_panel.grid(row=1, column=1, sticky="nsew", padx=(5, 0), pady=(5, 0))
         
         # Create UI sections in the controls frame
-        self.create_connection_section()
+        self.create_connection_and_log_row()
         
         # --- Create Main Tab View ---
         self.main_tab_view = ctk.CTkTabview(self.controls_frame)
@@ -999,16 +1240,35 @@ class PlatypusApp:
         
         self.main_tab_view.add("BMC Flashing")
         self.main_tab_view.add("FRU Data Flasher")
+        self.main_tab_view.add("Virtual Media")
         
         # Get tab frames
         self.bmc_flashing_tab = self.main_tab_view.tab("BMC Flashing")
         self.fru_data_flasher_tab = self.main_tab_view.tab("FRU Data Flasher")
+        self.virtual_media_tab = self.main_tab_view.tab("Virtual Media")
         
         # Populate tabs
         self.create_main_flashing_tab(self.bmc_flashing_tab)
         self.create_dmi_flasher_tab(self.fru_data_flasher_tab)
+        self.virtual_media_panel = VirtualMediaPanel(
+            self.virtual_media_tab,
+            get_bmc_ip=self.bmc_ip.get,
+            get_username=self.username.get,
+            get_password=self.password.get,
+            log=self.log_message,
+        )
+        self.virtual_media_panel.pack(fill="both", expand=True)
         
-        self.create_log_section()
+        self.sensors_panel = SensorsPanel(
+            self.controls_frame,
+            get_bmc_ip=self.bmc_ip.get,
+            get_username=self.username.get,
+            get_password=self.password.get,
+            log=self.log_message,
+            bmc_ip_var=self.bmc_ip,
+            on_ready=lambda ready: self.console_panel.set_external_redfish_ready("sensors", ready),
+        )
+        self.sensors_panel.pack(fill="x", pady=5)
         self.create_progress_section()
         
         # Do an initial refresh of networks
@@ -1100,60 +1360,79 @@ class PlatypusApp:
         # First refresh devices
         self.log_message("Initializing application...")
         
-        # Update device list
-        devices_found = self.refresh_devices()
+        # Update device list (also auto-connects the Serial console if
+        # exactly one ttyUSB device is found - see refresh_devices())
+        devices = self.refresh_devices()
         
-        # Just log the status without auto-opening console
-        if devices_found:
+        if devices:
             self.log_message("Serial devices detected. Use 'Console' button to open when needed.")
         else:
             self.log_message("No serial devices found. Please connect a device and click 'Refresh'.")
-                
-        def auto_open_console(self):
-            """Automatically open console if a serial device is available"""
-            if self.serial_device.get():
-                self.log_message("Auto-opening console...")
-                self.open_minicom_console()
-            else:
-                self.log_message("No serial device selected. Console not auto-opened.")
-                # Optionally, show a message to the user
-                from tkinter import messagebox
-                messagebox.showinfo(
-                    "Console Not Opened",
-                    "No serial device detected. Please select a device and click 'Console' to open."
-                )
 
 
     def on_window_resize(self, event):
         """Handle window resize events to maintain proper layout"""
         # Only process if it's the main window being resized
         if event.widget == self.root:
-            # Maintain a reasonable minimum size
-            if event.width < 900:
-                self.root.geometry(f"900x{event.height}")
+            # Maintain a reasonable minimum size (wider now that the
+            # console panel needs real room to be usable). Cheap, so this
+            # part runs immediately rather than being debounced below.
+            if event.width < 1100:
+                self.root.geometry(f"1100x{event.height}")
             if event.height < 600:
                 self.root.geometry(f"{event.width}x600")
+
+            # The column-relayout math itself is comparatively expensive,
+            # and Tk fires a flood of <Configure> events (often dozens)
+            # while a window is actively being dragged-resized - doing
+            # this on every single one of them is what made resizing feel
+            # laggy. Debounce it instead: only actually recompute once
+            # resizing has paused briefly, not on every intermediate frame.
+            if self._resize_debounce_job is not None:
+                try:
+                    self.root.after_cancel(self._resize_debounce_job)
+                except Exception:
+                    pass
+            self._resize_debounce_job = self.root.after(120, self._apply_resize_layout)
+
+    def _apply_resize_layout(self):
+        self._resize_debounce_job = None
+        # Adjust column minsizes to keep a roughly even, console-friendly
+        # split as the window is resized. Column 0 = controls (left),
+        # column 1 = the embedded Serial/SOL console (right).
+        try:
+            total_width = self.main_container.winfo_width()
+            
+            if total_width > 0:
+                console_width = max(480, int(total_width * 0.45))
+                controls_width = total_width - console_width
                 
-            # Adjust column weights if needed
-            try:
-                # Get current width
-                total_width = self.main_container.winfo_width()
-                
-                # Adjust column weights to maintain relative sizes
-                if total_width > 0:
-                    # We want console to be about 1/4 of the total width
-                    console_width = int(total_width * 0.28)
-                    controls_width = total_width - console_width
-                    
-                    self.main_container.columnconfigure(0, minsize=console_width)
-                    self.main_container.columnconfigure(1, minsize=controls_width)
-            except (AttributeError, tk.TclError):
-                # This can happen during initialization or teardown
-                pass
+                self.main_container.columnconfigure(0, minsize=controls_width)
+                self.main_container.columnconfigure(1, minsize=console_width)
+        except (AttributeError, tk.TclError):
+            # This can happen during initialization or teardown
+            pass
 
     
     def _init_variables(self):
         """Initialize all application variables"""
+        # Button theming - tracks which buttons use the plain default blue
+        # color (not a deliberately-colored one like the red Stop/Power
+        # Off buttons), so theme switching restyles exactly those. Copied
+        # per-instance so filling in "Default" below doesn't mutate the
+        # shared class-level dict.
+        self._themed_buttons = []
+        self._themed_radio_buttons = []
+        self._themed_segmented_buttons = []
+        self.BUTTON_THEMES = dict(PlatypusApp.BUTTON_THEMES)
+
+        # Auto password setup after a fresh eMMC flash: OpenBMC enforces a
+        # mandatory password change on first login with default creds (see
+        # bmc.post_flash_password_setup) - this is optional automation for
+        # that, off by default.
+        self.auto_password_reset_enabled = ctk.BooleanVar(value=False)
+        self.post_flash_default_password = ctk.StringVar(value="0penBmc123")
+
         # Connection settings
         self.username = ctk.StringVar()
         self.password = ctk.StringVar()
@@ -1189,7 +1468,7 @@ class PlatypusApp:
         # Master Home Directory
         self.user_home_dir = ""
 
-    def execute_flash_all(self, firmware_folder, fip_file, eeprom_file=None, bmc_type=2, do_flash_fru=True):
+    def execute_flash_all(self, firmware_folder, fip_file, eeprom_file=None, bmc_type=2, do_flash_fru=True, do_auto_password_compliance=False, default_password="0penBmc123"):
             """
             Execute the complete flash all sequence using the provided files.
             This method should be called from the FlashAllWindow.
@@ -1252,7 +1531,7 @@ class PlatypusApp:
                     self.serial_device.get()
                 ))
                 self.log_message("Running FRU Flash")
-                
+
                 time.sleep(35)
 
                 # Step 2: Flash U-Boot (FIP)
@@ -1275,7 +1554,7 @@ class PlatypusApp:
                 # Step 3: Flash EEPROM (if needed and requested)
                 if bmc_type != 1 and eeprom_file and do_flash_fru:
                     
-                    # --- NEW REBOOT, LOGIN, & IP LOGIC ---
+                    # --- REBOOT ---
                     self.log_message("Rebooting system before flashing EEPROM...")
                     try:
                         asyncio.run(bmc.reboot_bmc(
@@ -1284,48 +1563,109 @@ class PlatypusApp:
                         ))
                     except Exception as reboot_err:
                         self.log_message(f"Warning: Reboot command failed: {reboot_err}")
-                    
-                    self.log_message("Waiting 40 seconds for system to boot...")
-                    time.sleep(60)
-
-                    self.log_message("Logging in to prepare for EEPROM flash...")
-                    asyncio.run(login(
-                        self.username.get(), 
-                        self.password.get(), 
-                        self.serial_device.get(), 
-                        self.log_message
-                    ))
-
-                    self.log_message("Waiting 5 seconds before setting IP...")
-                    time.sleep(5)
-                    
-                    self.log_message("Setting BMC IP...")
-                    asyncio.run(set_ip(
-                        self.bmc_ip.get(), 
-                        lambda p: None, # Dummy callback to prevent progress bar jumping
-                        self.log_message, 
-                        self.serial_device.get()
-                    ))
-
-                    self.log_message("Waiting 2 seconds before initiating EEPROM flash...")
-                    time.sleep(2)
-                    # --------------------------------
 
                     current_step = 5
                     step_name = step_names[current_step]
                     self.log_message(f"\n[STEP {current_step}/{total_steps}] {step_name.upper()}")
                     self.log_message("-" * 30)
-                    
+
                     def eeprom_progress_callback(progress):
                         update_overall_progress(progress, current_step, step_name)
+
+                    if do_auto_password_compliance:
+                        # "Auto Set Password Compliance" is checked - one
+                        # call handles the 75s boot wait, the auto-set-
+                        # password sequence, setting the IP 2.5s later, and
+                        # flashing the EEPROM 2.5s after that.
+                        asyncio.run(bmc.flash_emmc_fru_checked(
+                            self.username.get(),
+                            self.password.get(),
+                            default_password,
+                            self.bmc_ip.get(),
+                            eeprom_file,
+                            self.your_ip.get(),
+                            eeprom_progress_callback,
+                            self.log_message,
+                            self.serial_device.get(),
+                        ))
+                    else:
+                        self.log_message("Waiting 75 seconds for system to boot...")
+                        time.sleep(75)
+
+                        # Pause and ask the user to handle login — either
+                        # manually via the "Auto Set Password" button (for
+                        # fresh firmware that enforces a mandatory password
+                        # change on first login, which plain login() can't
+                        # navigate), or just click Continue if the BMC is
+                        # already logged in / doesn't need the change.
+                        self.log_message("Waiting for user to complete login...")
+                        self._flash_all_login_event = threading.Event()
+
+                        def _show_login_popup():
+                            win = ctk.CTkToplevel(self.root)
+                            win.title("Flash All - Login Required")
+                            win.geometry("480x200")
+                            win.transient(self.root)
+                            win.attributes("-topmost", True)
+
+                            ctk.CTkLabel(
+                                win,
+                                text=(
+                                    "The BMC has rebooted and should be at the login prompt.\n\n"
+                                    "If this is fresh firmware, use the 'Auto Set Password'\n"
+                                    "button in Flashing Operations to log in and set the\n"
+                                    "password, then click Continue.\n\n"
+                                    "If already logged in, just click Continue."
+                                ),
+                                justify="left",
+                            ).pack(padx=20, pady=(20, 16))
+
+                            def _continue():
+                                win.destroy()
+                                self._flash_all_login_event.set()
+
+                            ctk.CTkButton(win, text="Continue", width=120, command=_continue).pack(pady=(0, 16))
+
+                            win.protocol("WM_DELETE_WINDOW", _continue)
+
+                        self.root.after(0, _show_login_popup)
+                        self._flash_all_login_event.wait()
+                        self.log_message("User confirmed login complete. Continuing...")
+
+                        self.log_message("Waiting 5 seconds before setting IP...")
+                        time.sleep(5)
                         
-                    asyncio.run(bmc.flash_eeprom(
-                        eeprom_file, 
-                        self.your_ip.get(), 
-                        eeprom_progress_callback,
-                        self.log_message, 
-                        self.serial_device.get()
-                    ))
+                        self.log_message("Setting BMC IP...")
+                        asyncio.run(set_ip(
+                            self.bmc_ip.get(), 
+                            lambda p: None, # Dummy callback to prevent progress bar jumping
+                            self.log_message, 
+                            self.serial_device.get(),
+                            self.username.get(),
+                            self.password.get(),
+                        ))
+
+                        self.log_message("Waiting 2 seconds before initiating EEPROM flash...")
+                        time.sleep(2)
+
+                        asyncio.run(bmc.flash_eeprom(
+                            eeprom_file, 
+                            self.your_ip.get(), 
+                            eeprom_progress_callback,
+                            self.log_message, 
+                            self.serial_device.get(),
+                            self.username.get(),
+                            self.password.get(),
+                        ))
+
+                    self.log_message("Rebooting system after EEPROM flash...")
+                    try:
+                        asyncio.run(bmc.reboot_bmc(
+                            self.log_message,
+                            self.serial_device.get()
+                        ))
+                    except Exception as reboot_err:
+                        self.log_message(f"Warning: Reboot command failed: {reboot_err}")
                 elif bmc_type != 1:
                     self.log_message(f"\n[STEP 5/{total_steps}] Skipping EEPROM Flash (as requested).") 
                     try:
@@ -1348,7 +1688,6 @@ class PlatypusApp:
                     time.sleep(3)
                     self.update_progress(0)
                 
-                import threading
                 threading.Thread(target=reset_progress, daemon=True).start()
                 
             except Exception as e:
@@ -1446,64 +1785,8 @@ class PlatypusApp:
 
 
     def force_close_port_80(self):
-        """
-        Force close any processes using port 80.
-        This is a more aggressive approach than cleanup_server_processes.
-        """
-        self.log_message("Forcibly closing any processes using port 80...")
-        try:
-            # Try using lsof command to find processes
-            try:
-                result = subprocess.run(
-                    ["lsof", "-i", ":80", "-t"], 
-                    capture_output=True, 
-                    text=True, 
-                    timeout=5
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
-                        if pid:
-                            self.log_message(f"Killing process {pid} using port 80")
-                            subprocess.run(["kill", "-9", pid], timeout=2)
-            except (subprocess.SubprocessError, FileNotFoundError):
-                pass
-                
-            # Try using netstat command (alternative approach)
-            try:
-                result = subprocess.run(
-                    ["netstat", "-tulpn"], 
-                    capture_output=True, 
-                    text=True, 
-                    timeout=5
-                )
-                if result.returncode == 0:
-                    import re
-                    # Look for lines with :80 and extract PID
-                    pattern = r'tcp\s+.*:80\s+.*LISTEN\s+(\d+)/'
-                    matches = re.findall(pattern, result.stdout)
-                    for pid in matches:
-                        self.log_message(f"Killing process {pid} using port 80")
-                        subprocess.run(["kill", "-9", pid], timeout=2)
-            except (subprocess.SubprocessError, FileNotFoundError):
-                pass
-            
-            # Use psutil as another alternative
-            for proc in psutil.process_iter(['pid', 'name', 'connections']):
-                try:
-                    for conn in proc.info['connections']:
-                        if hasattr(conn, 'laddr') and hasattr(conn.laddr, 'port') and conn.laddr.port == 80:
-                            self.log_message(f"Killing process {proc.info['pid']} ({proc.info['name']}) using port 80")
-                            psutil.Process(proc.info['pid']).kill()
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError, AttributeError):
-                    pass
-                    
-            self.log_message("Port 80 should now be available")
-        except Exception as e:
-            self.log_message(f"Error while closing port 80 processes: {e}")
-
-        # Give a brief pause to ensure processes are fully terminated
-        time.sleep(1)
+        """Close any other service listening on port 80 (see network.free_port)."""
+        free_port(80, self.log_message)
 
     def save_config(self):
         """Save current configuration to file"""
@@ -1545,7 +1828,14 @@ class PlatypusApp:
         # Cancel cleanup timer
         if self.cleanup_timer:
             self.root.after_cancel(self.cleanup_timer)
-        
+
+        # Disconnect the embedded console panel (serial or SOL SSH session)
+        try:
+            if hasattr(self, "console_panel"):
+                self.console_panel.disconnect()
+        except Exception:
+            pass
+
         # Clean up all serial connections
         for conn in self.active_serial_connections:
             try:
@@ -1574,13 +1864,39 @@ class PlatypusApp:
         except:
             pass
 
-    def create_connection_section(self):
+    def create_connection_and_log_row(self):
+        """Connection Settings sits at a compact, content-sized width (see
+        create_connection_section), which leaves empty space next to it in
+        the left column - put the Log panel there instead of wasting it."""
+        row = ctk.CTkFrame(self.controls_frame, fg_color="transparent")
+        row.pack(fill="x", pady=5)
+
+        self.create_connection_section(row)
+        self.create_log_section(row)
+
+    def create_connection_section(self, parent_frame):
         """Create the connection settings section with optimized spacing"""
-        section = ctk.CTkFrame(self.controls_frame)
-        section.pack(fill="x", pady=5)
+        # No fill="x" here (unlike other sections): letting the section
+        # size itself to its own content, rather than stretching to match
+        # the full width of its row, is what keeps it narrow. Its
+        # children still use fill="x" *relative to this frame*, so they
+        # correctly fill whatever width the section ends up needing.
+        section = ctk.CTkFrame(parent_frame)
+        section.pack(side="left", anchor="n")
         
         ctk.CTkLabel(section, text="Connection Settings", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
-        
+
+        # Button theme selector - restyles the app's plain blue buttons
+        # (not the deliberately red/green special-purpose ones).
+        theme_frame = ctk.CTkFrame(section, fg_color="transparent")
+        theme_frame.pack(fill="x", padx=10, pady=(0, 4))
+        ctk.CTkLabel(theme_frame, text="Button Theme:").pack(side="left", padx=(0, 8))
+        ctk.CTkSegmentedButton(
+            theme_frame,
+            values=["Default", "SNUC Yellow", "SNUC Blue"],
+            command=self.apply_button_theme,
+        ).pack(side="left")
+
         # Serial Device - made more compact
         device_frame = ctk.CTkFrame(section)
         device_frame.pack(fill="x", padx=10, pady=2)
@@ -1656,8 +1972,6 @@ class PlatypusApp:
         section = ctk.CTkFrame(parent_frame)
         section.pack(fill="x", pady=5)
         
-       
-        
         op_frame = ctk.CTkFrame(section)
         op_frame.pack(fill="x", padx=10)
         
@@ -1667,14 +1981,37 @@ class PlatypusApp:
             ("Set BMC IP", self.set_bmc_ip),
             ("Power ON Host", self.power_on_host),
             ("Reboot BMC", self.reboot_bmc),
-            ("Factory Reset", self.factory_reset)
+            ("Factory Reset", self.factory_reset),
+            ("Clear Event Log", self.clear_bmc_event_log),
         ]
         
         for i, (text, command) in enumerate(ops):
             row, col = divmod(i, 3)
-            ctk.CTkButton(op_frame, text=text, command=command, height=28).grid(row=row, column=col, padx=3, pady=3, sticky="ew")
+            button = ctk.CTkButton(op_frame, text=text, command=command, height=28)
+            button.grid(row=row, column=col, padx=3, pady=3, sticky="ew")
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
+
+        # Web UI hyperlink - shows the actual BMC IP and updates live as it
+        # changes, opens directly on click (in the desktop's default
+        # browser, as the real logged-in user rather than root - see
+        # launch_web_ui/_open_url_in_browser) instead of needing a
+        # separate button.
+        self.web_ui_link = ctk.CTkLabel(
+            section, text="Web UI: (set BMC IP)", text_color="#4EA1F7",
+            font=ctk.CTkFont(underline=True), cursor="hand2",
+        )
+        self.web_ui_link.pack(pady=(2, 8))
+        self.web_ui_link.bind("<Button-1>", lambda e: self.launch_web_ui())
+        self.bmc_ip.trace_add("write", self._update_web_ui_link)
+        self._update_web_ui_link()
+
+    def _update_web_ui_link(self, *args):
+        bmc_ip = self.bmc_ip.get().strip()
+        if hasattr(self, "web_ui_link"):
+            self.web_ui_link.configure(
+                text=f"Web UI: https://{bmc_ip}" if bmc_ip else "Web UI: (set BMC IP)"
+            )
 
     def create_flashing_operations_section(self, parent_frame):
         """Create the flashing operations section with optimized spacing"""
@@ -1694,7 +2031,10 @@ class PlatypusApp:
             ("Flash All", self.on_flash_all),
             ("Multi-Unit Flash", self.open_multi_unit_flash),  # NEW BUTTON
             ("Reboot to Bootloader", self.reboot_to_bootloader),
-            ("Set Home Directory", self.set_home_directory)
+            ("Auto Set Password", self.auto_set_password),
+            ("Set Home Directory", self.set_home_directory),
+            ("Open External Console", self.open_minicom_console),
+            ("Stop Operation", self.stop_operation),
         ]
         
         for i, (text, command) in enumerate(ops):
@@ -1706,6 +2046,13 @@ class PlatypusApp:
             if text == "Multi-Unit Flash":
                 button.configure(fg_color="#2B5CE6", hover_color="#1E3A8A", 
                             text_color="white", font=ctk.CTkFont(weight="bold"))
+                # Deliberately colored (not the plain default blue), so the
+                # theme collector wouldn't find it by color-matching alone -
+                # keep an explicit reference so theming can include it anyway.
+                self.multi_unit_flash_button = button
+            elif text == "Stop Operation":
+                self.stop_button = button
+                button.configure(fg_color="#cc0000", hover_color="#aa0000")
         
         op_frame.grid_columnconfigure((0,1,2), weight=1)
 
@@ -1731,37 +2078,40 @@ class PlatypusApp:
 
         ctk.CTkButton(tab, text="Flash FRU Data", command=self.flash_fru).pack(pady=10)
 
-    def create_log_section(self):
-        """Create the log section with reduced height"""
-        section = ctk.CTkFrame(self.controls_frame)  # Changed from self.main_frame to self.controls_frame
-        section.pack(fill="x", pady=5)
+    def create_log_section(self, parent_frame):
+        """Create the log section - sits beside Connection Settings,
+        filling the space freed up by that section no longer stretching
+        full-width."""
+        section = ctk.CTkFrame(parent_frame)
+        section.pack(side="left", fill="both", expand=True, padx=(10, 0))
         
-        ctk.CTkLabel(section, text="Log", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        header = ctk.CTkFrame(section, fg_color="transparent")
+        header.pack(fill="x", padx=10, pady=(5, 0))
+        ctk.CTkLabel(header, text="Log", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        ctk.CTkButton(
+            header, text="Delete All Logs", width=110, height=24, command=self.clear_log,
+            fg_color="#a94442", hover_color="#c9302c",
+        ).pack(side="right")
         
-        self.log_box = ctk.CTkTextbox(section, height=150, state="disabled")  # Reduced height from 200
+        self.log_box = ctk.CTkTextbox(section, height=260, state="disabled")
         self.log_box.pack(padx=10, pady=5, fill="x")
 
+    def clear_log(self):
+        """Wipe all messages from the log box."""
+        if hasattr(self, 'log_box') and self.log_box:
+            self.log_box.configure(state="normal")
+            self.log_box.delete("1.0", tk.END)
+            self.log_box.configure(state="disabled")
+
     def create_progress_section(self):
-            """Create the progress section with the console and stop buttons"""
+            """Create the progress section (just the progress bar now - the
+            Console and Stop Operation buttons live in the BMC operations
+            row above, inside the tabview)."""
             section = ctk.CTkFrame(self.controls_frame)
             section.pack(fill="x", pady=5)
             
             progress_frame = ctk.CTkFrame(section)
             progress_frame.pack(fill="x", padx=10, pady=5)
-            
-            # Console button
-            ctk.CTkButton(progress_frame, text="Console", command=self.open_minicom_console, height=28).pack(side="left", padx=5)
-            
-            # NEW: Stop Operation Button (Styled Red)
-            self.stop_button = ctk.CTkButton(
-                progress_frame, 
-                text="Stop Operation", 
-                command=self.stop_operation, 
-                height=28,
-                fg_color="#cc0000",      # Red color
-                hover_color="#aa0000"    # Darker red on hover
-            )
-            self.stop_button.pack(side="left", padx=5)
             
             self.progress = ctk.CTkProgressBar(progress_frame)
             self.progress.pack(side="left", expand=True, fill="x", padx=5)
@@ -1808,6 +2158,127 @@ class PlatypusApp:
             messagebox.showerror("Error", f"Failed to open multi-unit flash window:\n{e}")
 
 
+    def _collect_themable_buttons(self):
+        """Find every CTkButton/CTkRadioButton/CTkSegmentedButton in the
+        app that's still using the plain default blue theme color, so
+        theme switching can restyle exactly those - not the deliberately-
+        colored ones like the red Stop/Power Off buttons or the green
+        Power On button, which carry specific meaning and shouldn't change
+        with the button theme. CTkSegmentedButton matters here because
+        CTkTabview's own tab-selector strip (the "navbar" - BMC Flashing /
+        FRU Data Flasher / Virtual Media) is implemented internally as one
+        - it's a completely different widget class from CTkButton, so it
+        would otherwise be silently skipped entirely. The Multi-Unit Flash
+        button is deliberately colored too (a distinct blue, not the plain
+        default), so it wouldn't be found by color-matching alone - it's
+        added explicitly via the reference kept when it was created.
+        Collected once (lazily, on first use) after the whole UI has been
+        built, and captures the real default colors first so "Default"
+        can restore them exactly rather than guessing at hardcoded
+        values."""
+        if self._themed_buttons or self._themed_radio_buttons or self._themed_segmented_buttons:
+            return  # already collected
+
+        try:
+            from customtkinter import ThemeManager
+            btn_theme = ThemeManager.theme["CTkButton"]
+            seg_theme = ThemeManager.theme["CTkSegmentedButton"]
+            mode_idx = 1 if ctk.get_appearance_mode() == "Dark" else 0
+            self._default_button_colors = {
+                "fg_color": btn_theme["fg_color"][mode_idx],
+                "hover_color": btn_theme["hover_color"][mode_idx],
+                "text_color": btn_theme["text_color"][mode_idx],
+            }
+            self._default_segmented_colors = {
+                "selected_color": seg_theme["selected_color"][mode_idx],
+                "selected_hover_color": seg_theme["selected_hover_color"][mode_idx],
+            }
+        except Exception:
+            # Fall back to CTk's known built-in "blue" theme values if the
+            # theme manager's structure isn't what's expected.
+            self._default_button_colors = {
+                "fg_color": "#1F6AA5", "hover_color": "#144870", "text_color": "#DCE4EE",
+            }
+            self._default_segmented_colors = {
+                "selected_color": "#1F6AA5", "selected_hover_color": "#144870",
+            }
+
+        self.BUTTON_THEMES["Default"] = self._default_button_colors
+
+        def _walk(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, ctk.CTkSegmentedButton):
+                    try:
+                        current_selected = child._apply_appearance_mode(child.cget("selected_color"))
+                    except Exception:
+                        current_selected = None
+                    if current_selected == self._default_segmented_colors["selected_color"]:
+                        self._themed_segmented_buttons.append(child)
+                elif isinstance(child, (ctk.CTkButton, ctk.CTkRadioButton)):
+                    try:
+                        # cget("fg_color") returns the raw (light, dark)
+                        # tuple/list as originally set, not the resolved
+                        # color for the current appearance mode - comparing
+                        # that directly against a resolved hex string would
+                        # never match anything. _apply_appearance_mode()
+                        # is the same resolution method CTk itself uses
+                        # internally when actually drawing the widget.
+                        current_fg = child._apply_appearance_mode(child.cget("fg_color"))
+                    except Exception:
+                        current_fg = None
+                    if current_fg == self._default_button_colors["fg_color"]:
+                        if isinstance(child, ctk.CTkButton):
+                            self._themed_buttons.append(child)
+                        else:
+                            self._themed_radio_buttons.append(child)
+                _walk(child)
+
+        _walk(self.root)
+
+        if getattr(self, "multi_unit_flash_button", None) is not None:
+            if self.multi_unit_flash_button not in self._themed_buttons:
+                self._themed_buttons.append(self.multi_unit_flash_button)
+
+    def apply_button_theme(self, theme_name):
+        """Restyle every plain default-blue button/radio button/segmented-
+        button (including the CTkTabview navbar) in the app - plus the
+        Multi-Unit Flash button - to the chosen theme."""
+        self._collect_themable_buttons()
+        theme = self.BUTTON_THEMES.get(theme_name)
+        if theme is None:
+            return
+        for button in self._themed_buttons:
+            try:
+                button.configure(
+                    fg_color=theme["fg_color"],
+                    hover_color=theme["hover_color"],
+                    text_color=theme["text_color"],
+                )
+            except Exception:
+                pass
+        for radio in self._themed_radio_buttons:
+            try:
+                # Radio button label text isn't part of the accent color,
+                # so only the selection indicator's fg/hover change.
+                radio.configure(fg_color=theme["fg_color"], hover_color=theme["hover_color"])
+            except Exception:
+                pass
+        for seg in self._themed_segmented_buttons:
+            try:
+                # CTkSegmentedButton uses different color-key names than
+                # CTkButton (selected_color/selected_hover_color rather
+                # than fg_color/hover_color), but the same underlying hex
+                # values - CTk's default theme uses the identical blue for
+                # both - so the same theme dict applies directly here too.
+                seg.configure(selected_color=theme["fg_color"], selected_hover_color=theme["hover_color"])
+            except Exception:
+                pass
+        self.log_message(
+            f"Applied '{theme_name}' button theme to {len(self._themed_buttons)} button(s), "
+            f"{len(self._themed_radio_buttons)} radio button(s), and "
+            f"{len(self._themed_segmented_buttons)} segmented control(s)."
+        )
+
     def refresh_devices(self):
         """Find all available serial devices and update the dropdown"""
         # Find all serial devices
@@ -1825,9 +2296,33 @@ class PlatypusApp:
             if not self.serial_device.get() and devices:
                 self.serial_device.set(devices[0])
                 self.log_message(f"Automatically selected device: {devices[0]}")
-        
-        # Return whether we found any devices (useful for auto-open console)
-        return len(devices) > 0
+
+        # Auto-connect the embedded Serial console when there's exactly
+        # one ttyUSB device - nothing to choose between, so no need for a
+        # manual Connect click. Runs both at startup and on a manual
+        # Refresh click (e.g. after plugging a device in), but never
+        # disrupts a session that's already connected.
+        ttyusb_devices = [d for d in devices if "ttyUSB" in d]
+        if (len(ttyusb_devices) == 1 and hasattr(self, "console_panel")
+                and self.console_panel.mode == self.console_panel.MODE_SERIAL
+                and self.console_panel.backend is None):
+            self.log_message(f"Exactly one serial device found ({ttyusb_devices[0]}) - auto-connecting console.")
+            try:
+                self.console_panel.connect()
+            except Exception as e:
+                self.log_message(f"Auto-connect failed: {e}")
+        elif len(devices) > 2:
+            # Ambiguous which one to use - open the dropdown right away
+            # instead of making the user click it first to see the choices.
+            try:
+                self.serial_dropdown._open_dropdown_menu()
+            except Exception:
+                pass  # cosmetic convenience only - never block on it
+
+        # Return the devices found (empty list if none) - truthy/falsy
+        # compatible with callers that just check "were any found", and
+        # also usable by callers that need the actual list/count.
+        return devices
 
     def get_network_interfaces(self):
         """Get a comprehensive list of all network interfaces with valid IP addresses"""
@@ -2101,28 +2596,24 @@ class PlatypusApp:
             self.log_message("No serial device selected. Please select a device.")
             return
         try:
-            self.log_message(f"Launching Minicom on {self.serial_device.get()}...")
-            
+            device = self.serial_device.get()
+            self.log_message(f"Launching Minicom on {device}...")
+
             # Clean up any existing minicom processes first
             self.cleanup_minicom_processes()
-            
-            # Try terminator first (as requested)
-            try:
-                process = subprocess.Popen(
-                    ["terminator", "-e", f"minicom -D {self.serial_device.get()}"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                self.log_message(f"Minicom launched successfully (PID: {process.pid})")
-            except Exception:
-                # Fall back to xterm if terminator fails
-                process = subprocess.Popen(
-                    ["xterm", "-e", f"minicom -D {self.serial_device.get()}"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                self.log_message(f"Minicom launched in xterm (PID: {process.pid})")
-                
+
+            if not shutil.which("minicom"):
+                self.log_message("minicom is not installed. Install it with: sudo apt install minicom")
+                return
+
+            process = launch_in_terminal(
+                f"minicom -D {device}",
+                title=f"Console - {device}",
+                log=self.log_message,
+            )
+            if process is None:
+                self.log_message(f"Error launching Minicom: no working terminal emulator found on this system.")
+
         except Exception as e:
             self.log_message(f"Error launching Minicom: {e}")
 
@@ -2207,58 +2698,6 @@ class PlatypusApp:
         finally:
             self.lock_buttons = False
 
-    def force_close_port_80(self):
-        """
-        Force close any processes using port 80 with better error handling.
-        """
-        self.log_message("Forcibly closing any processes using port 80...")
-        try:
-            # Method 1: Use lsof command
-            try:
-                result = subprocess.run(
-                    ["lsof", "-i", ":80", "-t"], 
-                    capture_output=True, 
-                    text=True, 
-                    timeout=10  # Add timeout
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
-                        if pid and pid.isdigit():
-                            self.log_message(f"Killing process {pid} using port 80")
-                            try:
-                                subprocess.run(["kill", "-9", pid], timeout=5)
-                            except subprocess.TimeoutExpired:
-                                self.log_message(f"Timeout killing process {pid}")
-            except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError):
-                pass
-            
-            # Method 2: Use psutil with better error handling
-            try:
-                for proc in psutil.process_iter(['pid', 'name', 'connections']):
-                    try:
-                        connections = proc.info.get('connections', [])
-                        if connections:
-                            for conn in connections:
-                                if (hasattr(conn, 'laddr') and 
-                                    hasattr(conn.laddr, 'port') and 
-                                    conn.laddr.port == 80):
-                                    self.log_message(f"Killing process {proc.info['pid']} ({proc.info['name']}) using port 80")
-                                    psutil.Process(proc.info['pid']).kill()
-                                    break
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, 
-                            KeyError, AttributeError, TypeError):
-                        pass
-            except Exception as e:
-                self.log_message(f"Error using psutil method: {e}")
-                
-            self.log_message("Port 80 cleanup completed")
-        except Exception as e:
-            self.log_message(f"Error while closing port 80 processes: {e}")
-
-        # Give a brief pause to ensure processes are fully terminated
-        time.sleep(1)
-    
     # --- DMI Flasher Operations ---
 
     def flash_fru(self):
@@ -2341,6 +2780,168 @@ class PlatypusApp:
             self.lock_buttons = False
 
 
+    def _is_valid_ipv4(self, ip_str):
+        """Reject launching the web UI for an obviously incomplete/invalid
+        address (e.g. still mid-typing) rather than trying to open a
+        broken URL."""
+        import ipaddress
+        try:
+            ipaddress.IPv4Address(ip_str)
+            return True
+        except ValueError:
+            return False
+
+    def launch_web_ui(self):
+        """Open the BMC's web UI (https://<bmc_ip>) directly in the
+        desktop's default browser, as the real logged-in user rather than
+        root - Platypus is commonly run under sudo, where root has no
+        access to the desktop session, so _open_url_in_browser re-invokes
+        the browser launch as the actual user via $SUDO_USER. Only falls
+        back to clipboard+a dialog if that actually fails."""
+        bmc_ip = self.bmc_ip.get().strip()
+        if not bmc_ip:
+            self.log_message("Set the BMC IP first.")
+            messagebox.showerror("Launch Web UI", "Please enter a BMC IP first.")
+            return
+        if not self._is_valid_ipv4(bmc_ip):
+            messagebox.showwarning("Invalid BMC IP", "Enter a valid BMC IPv4 address first.")
+            return
+        url = f"https://{bmc_ip}"
+
+        if self._open_url_in_browser(url):
+            self.log_message(f"[NETWORK] Opened BMC interface: {url}")
+            return
+
+        copied = False
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(url)
+            copied = True
+        except Exception:
+            pass
+
+        self.log_message(
+            f"Could not open a browser automatically for {url}."
+            + (" Copied to clipboard." if copied else "")
+        )
+        clip_note = "It's been copied to your clipboard - paste it into a browser.\n\n" if copied else ""
+        messagebox.showinfo(
+            "Launch Web UI",
+            "Couldn't automatically open a browser. This commonly happens "
+            "when Platypus is run with sudo, since the root user doesn't "
+            "have access to your desktop session.\n\n"
+            f"{clip_note}URL: {url}",
+        )
+
+    def clear_bmc_event_log(self):
+        """Clear the BMC's Redfish event log(s) (LogService.ClearLog)."""
+        bmc_ip = self.bmc_ip.get().strip()
+        user = self.username.get().strip()
+        password = self.password.get()
+        if not bmc_ip or not user or not password:
+            messagebox.showerror("Clear Event Log", "Please enter BMC IP, username, and password first.")
+            return
+
+        if not messagebox.askyesno(
+            "Clear Event Log",
+            f"This will permanently clear the event log(s) on {bmc_ip}. Continue?",
+        ):
+            return
+
+        self.log_message(f"Clearing event log on {bmc_ip}...")
+
+        def _worker():
+            try:
+                summary = bmc.clear_event_log(user, password, bmc_ip)
+                self.root.after(0, lambda: self.log_message(summary))
+            except Exception as e:
+                # Capture into a plain variable before the lambda - see the
+                # note in inventory_panel.py for why referencing `e`
+                # directly inside a deferred lambda raises NameError.
+                error_msg = str(e)
+                self.root.after(0, lambda: self.log_message(f"Error clearing event log: {error_msg}"))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _find_user_session_env(self, target_uid):
+        """Find the real DISPLAY/WAYLAND_DISPLAY/XAUTHORITY/DBUS session
+        variables by reading the environment of a process that's already
+        running correctly inside that user's desktop session - rather
+        than guessing paths ourselves. This matters a lot on Wayland: the
+        Xwayland auth cookie lives at a randomly-named path under
+        /run/user/<uid>/ (e.g. .mutter-Xwaylandauth.XXXXXX), not the
+        classic ~/.Xauthority, so there's no fixed path to guess at all."""
+        env = {}
+        wanted = ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
+        for environ_path in glob.glob("/proc/*/environ"):
+            try:
+                pid_str = environ_path.split("/")[2]
+                if not pid_str.isdigit():
+                    continue
+                if os.stat(f"/proc/{pid_str}").st_uid != target_uid:
+                    continue
+                with open(environ_path, "rb") as f:
+                    raw = f.read()
+            except Exception:
+                continue
+
+            pairs = dict(
+                item.split("=", 1) for item in raw.decode(errors="ignore").split("\0") if "=" in item
+            )
+            if "DISPLAY" not in pairs and "WAYLAND_DISPLAY" not in pairs:
+                continue
+            for key in wanted:
+                if key in pairs and key not in env:
+                    env[key] = pairs[key]
+            if all(k in env for k in ("DISPLAY", "XAUTHORITY")) or "WAYLAND_DISPLAY" in env:
+                break  # found a solid candidate, no need to keep scanning
+
+        return env
+
+    def _open_url_in_browser(self, url):
+        """Try to open `url` in the desktop's default browser.
+
+        Under sudo, this needs to actually launch as the real desktop
+        user, not root - browsers like Firefox explicitly refuse to run
+        as root inside a regular user's session (a deliberate safety
+        check, not a missing-permission error) even when the display
+        connection itself works fine. So rather than guessing a session
+        path (the Wayland/Xwayland auth cookie in particular has no fixed
+        location), this reads the target user's *actual* running session
+        environment first (see _find_user_session_env) and launches with
+        that."""
+        sudo_user = os.environ.get("SUDO_USER")
+        if hasattr(os, "geteuid") and os.geteuid() == 0 and sudo_user:
+            try:
+                target_uid = pwd.getpwnam(sudo_user).pw_uid
+                session_env = self._find_user_session_env(target_uid)
+                if session_env:
+                    env = os.environ.copy()
+                    env["HOME"] = pwd.getpwnam(sudo_user).pw_dir
+                    env.update(session_env)
+                    result = subprocess.run(
+                        ["sudo", "-u", sudo_user, "-E", "xdg-open", url],
+                        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                    )
+                    if result.returncode == 0:
+                        return True
+            except Exception:
+                pass  # fall through to the plain attempt below
+
+        try:
+            if webbrowser.open_new_tab(url):
+                return True
+        except Exception:
+            pass
+
+        try:
+            result = subprocess.run(
+                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def set_bmc_ip(self):
         """Set BMC IP address"""
         required = {"BMC IP": self.bmc_ip.get(), "Serial Device": self.serial_device.get()}
@@ -2359,7 +2960,9 @@ class PlatypusApp:
                 self.bmc_ip.get(), 
                 self.update_progress, 
                 self.log_message, 
-                self.serial_device.get()
+                self.serial_device.get(),
+                self.username.get(),
+                self.password.get(),
             )
         except Exception as e:
             self.log_message(f"Error during IP setup: {e}")
@@ -2381,7 +2984,9 @@ class PlatypusApp:
         try:
             await bmc.power_host(
                 self.log_message, 
-                self.serial_device.get()
+                self.serial_device.get(),
+                self.username.get(),
+                self.password.get(),
             )
         except Exception as e:
             self.log_message(f"Error powering on host: {e}")
@@ -2571,6 +3176,14 @@ class PlatypusApp:
                 self.log_message,
                 self.serial_device.get()  # ADD THIS LINE
             )
+
+            if self.auto_password_reset_enabled.get():
+                await bmc.post_flash_password_setup(
+                    self.serial_device.get(),
+                    self.post_flash_default_password.get(),
+                    self.password.get(),
+                    self.log_message,
+                )
         except Exception as e:
             self.log_message(f"Error during eMMC flashing: {e}")
             # Cleanup on error
@@ -2661,7 +3274,9 @@ class PlatypusApp:
                 self.your_ip.get(), 
                 self.update_progress, 
                 self.log_message, 
-                self.serial_device.get()
+                self.serial_device.get(),
+                self.username.get(),
+                self.password.get(),
             )
         except Exception as e:
             self.log_message(f"Error during EEPROM flashing: {e}")
@@ -2738,15 +3353,15 @@ class PlatypusApp:
                 fw_content = fw_file.read()
                 self.log_message(f"Starting {update_type} update process...")
                 is_bmc_file = "bmc" in self.flash_file.lower()
+                update_func = bmc.bmc_update if is_bmc_file else bmc.bios_update
 
-                await bmc.bios_update(
+                await update_func(
                     self.username.get(),
                     self.password.get(),
                     self.bmc_ip.get(),
                     fw_content,
                     self.update_progress,
                     self.log_message,
-                    is_bmc=is_bmc_file
                 )
         except Exception as e:
             self.log_message(f"Error during update: {e}")
@@ -2776,6 +3391,45 @@ class PlatypusApp:
                 
         except Exception as e:
             self.log_message(f"Error rebooting to bootloader: {e}")
+        finally:
+            self.lock_buttons = False
+
+    def auto_set_password(self):
+        """Manually run a login + password-change sequence on demand:
+        logs in with the current Connection Settings username/password,
+        then resets the BMC's password to the configured default password
+        (see run_auto_set_password for why this direction, as opposed to
+        the automatic Flash All + FRU / Flash eMMC flows)."""
+        required = {"Serial Device": self.serial_device.get(), "Password": self.password.get()}
+        if self._run_operation(
+            self.run_auto_set_password,
+            required_fields=required,
+            error_msg="Please select a serial device and enter a password in Connection Settings first"
+        ):
+            self.log_message("Running login + password setup sequence...")
+
+    async def run_auto_set_password(self):
+        """Run the manual auto-set-password sequence.
+
+        Note this runs in the OPPOSITE direction from the automatic
+        Flash All + FRU / Flash eMMC flows: those log in with the default
+        password and set it to Connection Settings' password (a freshly
+        flashed BMC really does start on the factory default). This
+        button instead logs in with Connection Settings' current
+        username/password and sets it TO the configured default password
+        - for resetting a BMC that's already on a known working password
+        back to the standard default.
+        """
+        try:
+            await bmc.post_flash_login_and_password_sequence(
+                self.username.get(),
+                self.password.get(),
+                self.post_flash_default_password.get(),
+                self.serial_device.get(),
+                self.log_message,
+            )
+        except Exception as e:
+            self.log_message(f"Error during password setup: {e}")
         finally:
             self.lock_buttons = False
 
@@ -2809,7 +3463,9 @@ class PlatypusApp:
                 self.bmc_ip.get(), 
                 self.update_progress, 
                 self.log_message, 
-                self.serial_device.get()
+                self.serial_device.get(),
+                self.username.get(),
+                self.password.get(),
             )
             
             # Add notification about Web UI after IP is set
