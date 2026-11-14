@@ -2,7 +2,7 @@
 
 Platypus is a Python/CustomTkinter desktop application for managing BMC (Baseboard Management Controller) and server hardware. It talks to hardware over the Redfish API, serial/UART connections, and SSH, and wraps common bring-up and maintenance workflows — firmware flashing, BIOS/BMC updates, network configuration, and console access — in a single GUI, with a parallel CLI for scripted/headless use.
 
-**Current version:** 6.1.2
+**Current version:** 7.0
 
 ## Features
 
